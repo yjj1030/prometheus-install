@@ -1,0 +1,153 @@
+# ==============================================================================
+# node_alerts_v1.0.0_stress.yml
+#
+# 压测环境专用告警（alert_policy="stress"）
+# 与 node_alerts_v3.0.0_prod.yml 二选一加载：同一实例不双轨
+#
+# 与 prod 的差异:
+#   - 阈值显著高于 prod（压测目标预期高负载，prod 阈值将产生大量误报）
+#   - 仅关心容量/性能上限告警，不关心业务可用性
+#   - 不发 critical/emergency（夜间不叫醒）
+# ==============================================================================
+
+groups:
+
+  - name: node-stress-alerts
+    interval: 1m
+    rules:
+      - alert: HostStressCPUHigh
+        expr: node:cpu_usage:percent{alert_policy="stress"} > 95
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_cpu_high
+          notify_profile: resource_cpu
+        annotations:
+          summary: "压测目标 {{ $labels.instance }} CPU {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "压测已逼近硬件极限，结果可信度下降。"
+          action: "压测工程师介入，决定是否继续加压。"
+          description: "压测目标 CPU 持续 30 分钟超过 95%。"
+
+      - alert: HostStressMemoryHigh
+        expr: node:memory_usage:percent{alert_policy="stress"} > 95
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_mem_high
+          notify_profile: resource_memory
+        annotations:
+          summary: "压测目标 {{ $labels.instance }} 内存 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "OOM 风险。"
+          action: "压测工程师介入。"
+          description: "压测目标内存持续 30 分钟超过 95%。"
+
+      - alert: HostStressNetworkIOHigh
+        expr: node:network_throughput:rate5m{alert_policy="stress"} > 1e9
+        for: 30m
+        labels:
+          severity: info
+          asset_type: server
+          category: performance
+          alert_type: capacity
+          condition_id: host_net_io_ceiling
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "压测目标 {{ $labels.instance }} 网络吞吐 {{ printf \"%.0f\" $value }} B/s"
+          current_value: "{{ printf \"%.0f\" $value }} B/s"
+          threshold: "1 GB/s"
+          impact: "已达 1Gbps 上限。"
+          action: "确认压测预期流量；与基线比对。"
+          description: "压测目标网络吞吐持续 30 分钟超过 1GB/s。"
+
+      - alert: HostStressTCPConnectionHigh
+        expr: node:tcp_curr_estab:sum{alert_policy="stress"} > 100000
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_tcp_high
+          notify_profile: system_limit
+        annotations:
+          summary: "压测目标 {{ $labels.instance }} TCP 当前连接 {{ printf \"%.0f\" $value }}"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "100000"
+          impact: "已逼近连接跟踪/系统上限。"
+          action: "压测工程师介入；评估 conntrack 调整。"
+          description: "压测目标 TCP 当前连接数持续 10 分钟超过 10 万。"
+
+  # ===========================================================================
+  # v3.0.0-rc4 P1-02: 压测环境底线告警（保留 critical / emergency，不宽松）
+  # 即便在压测环境，仍必须保留以下底线告警：
+  #   - 节点彻底失联 (NodeDown)
+  #   - 监控代理失联 (MonitoringAgentLost)
+  #   - 磁盘将满 (FilesystemWillBeFull)
+  # 这三类不参与阈值宽松；其他宽阈值告警见 node-stress-alerts
+  # ===========================================================================
+  - name: node-stress-bottom-line-alerts
+    interval: 30s
+    rules:
+      - alert: NodeDown
+        expr: up{job="node_exporter",alert_policy="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: node_down
+          notify_profile: availability
+        annotations:
+          summary: "压测节点 {{ $labels.instance }} 已 3 分钟不可达"
+          current_value: "0"
+          threshold: "up==0"
+          impact: "压测中断；metrics 与心跳均断流。"
+          action: "立即上线处理；检查 node_exporter 状态与主机可达性。"
+          description: "node_exporter 在压测目标 instance={{ $labels.instance }} 上 up==0 持续 3 分钟。"
+
+      - alert: MonitoringAgentLost
+        expr: up{job="node_exporter",alert_policy="stress"} == 0
+        for: 5m
+        labels:
+          severity: emergency
+          asset_type: monitoring
+          category: monitoring
+          alert_type: state
+          condition_id: agent_lost
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "压测节点监控代理 {{ $labels.instance }} 失联 5 分钟"
+          current_value: "0"
+          threshold: "up==0"
+          impact: "压测期间所有告警与链路自证失效。"
+          action: "现场介入；其他指标无意义，需重启采集代理。"
+          description: "节点监控代理不可达 5 分钟，所有压测可观测性失效。"
+
+      - alert: FilesystemWillBeFull
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint!~"/boot.*",alert_policy="stress"}[6h], 4*3600) < 0
+        for: 30m
+        labels:
+          severity: critical
+          asset_type: server
+          category: capacity
+          alert_type: forecast
+          condition_id: fs_will_be_full
+          notify_profile: capacity_forecast
+        annotations:
+          summary: "压测节点 {{ $labels.instance }} 磁盘 {{ $labels.mountpoint }} 4 小时内将满"
+          current_value: "{{ printf \"%.1f\" $value }}B"
+          threshold: "<0"
+          impact: "压测结果数据丢失；压测被迫中止。"
+          action: "立即清理日志与临时文件；扩容或挂载新卷。"
+          description: "Filesystem {{ $labels.mountpoint }} 在 4 小时内将耗尽可用空间。"

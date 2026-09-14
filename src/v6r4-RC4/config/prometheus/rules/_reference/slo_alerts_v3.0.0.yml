@@ -1,0 +1,181 @@
+# ==============================================================================
+# slo_alerts_v3.0.0.yml
+#
+# 审核 P1-16: SLI/SLO 多窗口告警（与 global_alerts_v1.0.0.yml 互补）
+#
+# global_alerts 已有：
+#   - ProbeAvailabilitySLOBurnFast  (1h × 14.4x)
+#   - ProbeAvailabilitySLOBurnSlow  (24h × 6x)
+#
+# 本文件新增：
+#   - 4 窗口（5m/30m/6h/24h）× 多燃烧率档位（Google SRE Workbook）
+#   - 错误预算剩余（error_budget_remaining:percent）
+#   - 预算耗尽预测（predicted_exhaustion_at）
+#
+# PLACEHOLDER slo-alerts: enabled=false
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 0. 错误预算剩余（28 天滚动窗口，标准 SRE 实践）
+  # ===========================================================================
+  - name: slo-error-budget-records
+    interval: 5m
+    rules:
+      # 采集可用率 SLO 错误预算剩余（百分比）
+      - record: slo:probe_availability:error_budget_remaining:28d
+        expr: |
+          100 * (
+            1 - (
+              (1 - (
+                sum(avg_over_time(up{job=~"blackbox-.*"}[28d]))
+                /
+                count(up{job=~"blackbox-.*"})
+              )) / 0.001
+            )
+          )
+
+      # 5 分钟燃烧率（瞬时）
+      - record: slo:probe_availability:burn_rate:5m
+        expr: |
+          (
+            1 - (
+              sum(rate(up{job=~"blackbox-.*"}[5m]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )
+          ) / 0.001
+
+      - record: slo:probe_availability:burn_rate:30m
+        expr: |
+          (
+            1 - (
+              sum(rate(up{job=~"blackbox-.*"}[30m]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )
+          ) / 0.001
+
+      - record: slo:probe_availability:burn_rate:6h
+        expr: |
+          (
+            1 - (
+              sum(rate(up{job=~"blackbox-.*"}[6h]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )
+          ) / 0.001
+
+      - record: slo:probe_availability:burn_rate:24h
+        expr: |
+          (
+            1 - (
+              sum(rate(up{job=~"blackbox-.*"}[24h]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )
+          ) / 0.001
+
+      # 预算耗尽预测（线性外推）
+      - record: slo:probe_availability:predicted_exhaustion_days
+        expr: |
+          (
+            slo:probe_availability:error_budget_remaining:28d
+            /
+            clamp_min(slo:probe_availability:burn_rate:24h, 0.01)
+          )
+
+  # ===========================================================================
+  # 1. 多窗口告警（Google SRE Workbook 表 4）
+  # ===========================================================================
+  # 关键要求：同时满足"短窗口高燃烧 + 长窗口高燃烧"才告警（避免短暂抖动触发）
+  - name: slo-multi-window-alerts
+    interval: 1m
+    rules:
+      # 页面告警（page）：2% 预算快燃（5m/1h 都高）
+      - alert: ProbeAvailabilitySLOPageFast
+        expr: |
+          slo:probe_availability:burn_rate:5m > 14.4
+          and
+          slo:probe_availability:burn_rate:1h > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: capacity
+          condition_id: probe_availability_slo_page_fast
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 SLO 双窗口快燃（5m + 1h）"
+          current_value: "burn_5m={{ printf \"%.2f\" $value }}x"
+          threshold: "5m × 1h 双窗口 > 14.4x"
+          impact: "按当前速率 1 小时内耗尽 28 天预算。"
+          action: "立即现场介入；启动事件响应流程。"
+          description: "满足 Google SRE Workbook 'page' 模式：短+长窗口同时高燃烧。"
+
+      # 票务告警（ticket）：5% 预算慢燃（30m/6h 都高）
+      - alert: ProbeAvailabilitySLOTicketSlow
+        expr: |
+          slo:probe_availability:burn_rate:30m > 6
+          and
+          slo:probe_availability:burn_rate:6h > 6
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: capacity
+          condition_id: probe_availability_slo_ticket_slow
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 SLO 双窗口慢燃（30m + 6h）"
+          current_value: "burn_30m={{ printf \"%.2f\" $value }}x"
+          threshold: "30m × 6h 双窗口 > 6x"
+          impact: "按当前速率 3.7 天内耗尽 28 天预算。"
+          action: "创建工单；排期排查。"
+          description: "满足 Google SRE Workbook 'ticket' 模式：30m+6h 双窗口中速燃烧。"
+
+  # ===========================================================================
+  # 2. 预算耗尽预测（独立告警维度）
+  # ===========================================================================
+  - name: slo-budget-exhaustion-alerts
+    interval: 1h
+    rules:
+      - alert: SLOErrorBudgetLow
+        expr: slo:probe_availability:error_budget_remaining:28d{alert_policy!="stress"} < 25
+        for: 1h
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: capacity
+          condition_id: slo_budget_low
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 28 天预算剩余 {{ printf \"%.1f\" $value }}% < 25%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "25%"
+          impact: "SLO 风险显著上升。"
+          action: "暂停非必要变更；启动可靠性提升工作。"
+          description: "SLO 错误预算剩余 < 25%，需要严格控制风险。"
+
+      - alert: SLOErrorBudgetExhaustedSoon
+        expr: slo:probe_availability:predicted_exhaustion_days{alert_policy!="stress"} < 7
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: forecast
+          condition_id: slo_budget_exhaustion_soon
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 SLO 预算将在 {{ printf \"%.1f\" $value }} 天内耗尽"
+          current_value: "{{ printf \"%.1f\" $value }} 天"
+          threshold: "< 7 天"
+          impact: "SLO 即将耗尽；需立即行动。"
+          action: "管理层升级；冻结所有非紧急变更。"
+          description: "按当前 24h 燃烧率线性外推，预算将在 7 天内耗尽。"
+
+# PLACEHOLDER slo-alerts: enabled=false

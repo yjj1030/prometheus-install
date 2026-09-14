@@ -1,0 +1,443 @@
+# ==============================================================================
+# docker_k8s_alerts_v3.0.0.yml
+#
+# Docker (cAdvisor 0.49.1) 与 Kubernetes 告警
+#
+# 红线（02 §2.4）：
+#   - container_scrape_error 不存在，健康判断用 up + container_last_seen
+#   - K8s 场景只抓 kubelet /metrics/cadvisor（不部署 standalone）
+#   - kubelet 只启用 8 set：勿引用 tcp/udp/sched/percpu
+#   - standalone 无 pod/namespace 标签
+#
+# 标签契约：六标签 + 六元组 annotations
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. Docker 容器（cAdvisor，job=docker_cadvisor）
+  # ===========================================================================
+  - name: docker-cadvisor-container-alerts
+    interval: 30s
+    rules:
+      - alert: ContainerKilled
+        expr: (time() - container_last_seen{alert_policy!="stress", name!=""}) > 300
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: availability
+          alert_type: state
+          condition_id: container_killed
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} 已消失 {{ printf \"%.0f\" $value }}s"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "last_seen 距今 > 300s 且持续 5m"
+          impact: "容器业务可能已停服。"
+          action: "docker ps / docker logs 排查；检查重启策略。"
+          description: "cAdvisor 在 5 分钟前还能看到，当前已丢失。"
+
+      - alert: ContainerCPUThrottled
+        expr: rate(container_cpu_cfs_throttled_seconds_total{alert_policy!="stress"}[5m]) / rate(container_cpu_cfs_periods_total{alert_policy!="stress"}[5m]) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: performance
+          alert_type: threshold
+          condition_id: container_cpu_throttle
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 节流比例 {{ printf \"%.1f\" $value }}*100%"
+          current_value: "{{ printf \"%.1f\" $value }}"
+          threshold: "0.5"
+          impact: "容器性能受限。"
+          action: "调整 cpu limit 或迁移到空闲节点。"
+          description: "cgroup CPU 节流占总周期 > 50%。"
+
+      - alert: ContainerCPUHighWarning
+        expr: rate(container_cpu_usage_seconds_total{alert_policy!="stress", name!=""}[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_cpu_high
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 使用率 {{ printf \"%.1f\" $value }}% > 80% (10m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "应用响应慢。"
+          action: "查看进程级热点，必要时扩容。"
+          description: "CPU 10 分钟持续 80%。"
+
+      - alert: ContainerCPUHighCritical
+        expr: rate(container_cpu_usage_seconds_total{alert_policy!="stress", name!=""}[5m]) * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_cpu_high
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 使用率 {{ printf \"%.1f\" $value }}% > 95% (5m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "服务近不可用。"
+          action: "立即缓解：重启/扩容/切流。"
+          description: "CPU 5 分钟持续 95%。"
+
+      # 审核 P1-11: 配额占用 vs 限流比例分开
+      #   - cpu_usage_seconds_total 反映实际使用（单核 1.0 即满）
+      #   - spec_cpu_quota / spec_cpu_period 反映限额（quota/period = 核数）
+      #   - 当 quota 已满但未 throttling → 用 CPU 配额占用
+      #   - 当 throttling 比例高 → 用限流比例（更直接）
+      - record: container:cpu_quota_used:percent
+        expr: |
+          100 * (
+            rate(container_cpu_usage_seconds_total{alert_policy!="stress", name!=""}[5m])
+            /
+            clamp_min(
+              container_spec_cpu_quota{alert_policy!="stress", name!=""}
+              /
+              container_spec_cpu_period{alert_policy!="stress", name!=""},
+              0.01
+            )
+          )
+
+      - alert: ContainerCPUQuotaHigh
+        expr: container:cpu_quota_used:percent{alert_policy!="stress"} > 90
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_cpu_quota_used
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 配额占用 {{ printf \"%.1f\" $value }}% > 90%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "90%"
+          impact: "已逼近 CPU 限额（quota）；可能开始 throttling。"
+          action: "调整 spec.cpu.limit 或评估是否合理。"
+          description: "CPU 配额占用 10 分钟超过 90%。"
+
+      - alert: ContainerCPUQuotaCritical
+        expr: container:cpu_quota_used:percent{alert_policy!="stress"} > 99
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_cpu_quota_used
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 配额已满 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "99%"
+          impact: "CPU 配额已耗尽；几乎必定伴随 throttling。"
+          action: "立即扩容或紧急释放；检查是否配置错误（limit 太小）。"
+          description: "CPU 配额占用 5 分钟超过 99%。"
+
+      - alert: ContainerCPUThrottledRatio
+        expr: |
+          100 * (
+            rate(container_cpu_cfs_throttled_seconds_total{alert_policy!="stress", name!=""}[5m])
+            /
+            clamp_min(
+              label_replace(container_spec_cpu_period{alert_policy!="stress", name!=""}, "name", "$1", "name", "(.*)") * 0.001,
+              1
+            )
+          ) > 25
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: performance
+          alert_type: threshold
+          condition_id: container_cpu_throttle
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 节流比例高 {{ printf \"%.1f\" $value }}% > 25%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "25%"
+          impact: "性能受限，CPU 时间未充分分配。"
+          action: "调整 cpu limit 或迁移到空闲节点。"
+          description: "CFS throttled 时间占 cgroup period 总时长 25%+，持续 10 分钟。"
+
+      - alert: ContainerCPUThrottledRatioCritical
+        expr: |
+          100 * (
+            rate(container_cpu_cfs_throttled_seconds_total{alert_policy!="stress", name!=""}[5m])
+            /
+            clamp_min(
+              label_replace(container_spec_cpu_period{alert_policy!="stress", name!=""}, "name", "$1", "name", "(.*)") * 0.001,
+              1
+            )
+          ) > 50
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: container_host
+          category: performance
+          alert_type: threshold
+          condition_id: container_cpu_throttle
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} CPU 节流严重 {{ printf \"%.1f\" $value }}% > 50%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "50%"
+          impact: "CPU 实际算力只有一半；时延飙升。"
+          action: "立即调整 limit 或调度到高优先级节点。"
+          description: "CFS throttled 时间占 cgroup period 50%+，持续 5 分钟。"
+
+      - alert: ContainerMemoryHigh
+        expr: container_memory_usage_bytes{alert_policy!="stress", name!=""} / container_spec_memory_limit_bytes{alert_policy!="stress", name!=""} * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_mem_high
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} 内存使用 {{ printf \"%.1f\" $value }}% > 85%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "85%"
+          impact: "面临 OOM-kill 风险。"
+          action: "调整 limit 或优化内存占用。"
+          description: "内存 10 分钟超过 limit 85%。"
+
+      - alert: ContainerMemoryCritical
+        expr: container_memory_usage_bytes{alert_policy!="stress", name!=""} / container_spec_memory_limit_bytes{alert_policy!="stress", name!=""} * 100 > 95
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: container_host
+          category: resource
+          alert_type: threshold
+          condition_id: container_mem_high
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} 内存使用 {{ printf \"%.1f\" $value }}% > 95%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "随时被 OOM-kill。"
+          action: "立即处理：调整 limit 或重启。"
+          description: "内存 3 分钟超过 limit 95%。"
+
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{alert_policy!="stress"}[10m]) > 0
+        labels:
+          severity: critical
+          asset_type: container_host
+          category: availability
+          alert_type: event
+          condition_id: container_oom
+          notify_profile: container
+        annotations:
+          summary: "容器 {{ $labels.name }} 在 10 分钟内发生过 OOM"
+          current_value: "{{ printf \"%.0f\" $value }} 次"
+          threshold: "increase(oom_events_total[10m]) > 0"
+          impact: "容器已被内核杀掉。"
+          action: "docker inspect/state；调整 memory limit 或修复泄漏。"
+          description: "10 分钟内 OOM 事件计数增加。"
+
+      - alert: ContainerRestarting
+        expr: increase(kube_pod_container_status_restarts_total{alert_policy!="stress"}[15m]) >= 2
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: availability
+          alert_type: event
+          condition_id: container_restart
+          notify_profile: kubernetes
+        annotations:
+          summary: "容器/Pod 15 分钟内重启 ≥ 2 次"
+          current_value: "{{ printf \"%.0f\" $value }} 次"
+          threshold: "≥ 2 次/15m"
+          impact: "服务可用性受损。"
+          action: "查看日志和退出码；检查健康检查策略。"
+          description: "15 分钟内重启次数≥2。"
+
+  # ===========================================================================
+  # 2. Kubernetes Pod / Deployment / StatefulSet
+  # ===========================================================================
+  - name: k8s-workload-alerts
+    interval: 30s
+    rules:
+      - alert: K8sPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{alert_policy!="stress"}[15m]) * 60 * 15 > 0
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: availability
+          alert_type: event
+          condition_id: k8s_pod_crash
+          notify_profile: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} 频繁重启"
+          current_value: "{{ printf \"%.2f\" $value }}/min"
+          threshold: "> 0/15m"
+          impact: "服务可用性下降。"
+          action: "kubectl describe/logs；检查 Readiness/Liveness 探针。"
+          description: "15 分钟内重启率 > 0。"
+
+      - alert: K8sPodNotReady
+        expr: sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown", alert_policy!="stress"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: availability
+          alert_type: state
+          condition_id: k8s_pod_notready
+          notify_profile: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} 状态 {{ $labels.phase }}"
+          current_value: "phase={{ $labels.phase }}"
+          threshold: "Pending|Unknown 持续 ≥ 15m"
+          impact: "应用副本不足。"
+          action: "kubectl describe pod；检查镜像拉取/节点资源。"
+          description: "Pod 状态非 Running 持续 15 分钟。"
+
+      - alert: K8sDeploymentReplicasMismatch
+        expr: (kube_deployment_spec_replicas{alert_policy!="stress"} != kube_deployment_status_replicas_available{alert_policy!="stress"}) and (kube_deployment_status_replicas_available{alert_policy!="stress"} > 0)
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: capacity
+          alert_type: state
+          condition_id: k8s_deploy_replica
+          notify_profile: kubernetes
+        annotations:
+          summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 副本不匹配"
+          current_value: "期望 vs 可用副本不匹配"
+          threshold: "spec ≠ status 持续 ≥ 15m"
+          impact: "副本数不足。"
+          action: "kubectl describe deploy；检查 HPA/PDB/镜像拉取。"
+          description: "期望副本数与可用副本数不匹配。"
+
+      - alert: K8sStatefulSetReplicasMismatch
+        expr: (kube_statefulset_spec_replicas{alert_policy!="stress"} != kube_statefulset_status_replicas_ready{alert_policy!="stress"})
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: capacity
+          alert_type: state
+          condition_id: k8s_sts_replica
+          notify_profile: kubernetes
+        annotations:
+          summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} 副本未就绪"
+          current_value: "期望 vs 就绪副本不匹配"
+          threshold: "spec ≠ ready 持续 ≥ 15m"
+          impact: "有状态服务副本数不足。"
+          action: "kubectl describe sts；检查 PVC/调度。"
+          description: "StatefulSet 副本未就绪。"
+
+      - alert: K8sNodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true", alert_policy!="stress"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: kubernetes
+          category: availability
+          alert_type: state
+          condition_id: k8s_node_down
+          notify_profile: kubernetes
+        annotations:
+          summary: "K8s Node {{ $labels.node }} NotReady 5 分钟"
+          current_value: "Ready=false"
+          threshold: "Ready=false 持续 ≥ 5m"
+          impact: "节点上 Pod 不可调度。"
+          action: "kubectl describe node；检查 kubelet/runtime。"
+          description: "kubelet 心跳/状态异常。"
+
+      - alert: K8sNodeUnreachable
+        expr: kube_node_status_condition{condition="Ready", status="true", alert_policy!="stress"} == 0
+        for: 15m
+        labels:
+          severity: emergency
+          asset_type: kubernetes
+          category: availability
+          alert_type: state
+          condition_id: k8s_node_down
+          notify_profile: kubernetes
+        annotations:
+          summary: "K8s Node {{ $labels.node }} 持续 15 分钟 NotReady"
+          current_value: "Ready=false"
+          threshold: "Ready=false 持续 ≥ 15m"
+          impact: "节点上业务基本不可用。"
+          action: "现场介入；检查网络/主机硬件。"
+          description: "节点长时间不可用。"
+
+      - alert: K8sPVCLow
+        expr: 100 - (kubelet_volume_stats_available_bytes{alert_policy!="stress"} / kubelet_volume_stats_capacity_bytes{alert_policy!="stress"}) * 100 > 85
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: capacity
+          alert_type: capacity
+          condition_id: k8s_pvc_low
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} 使用 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "85%"
+          impact: "后续写入可能失败。"
+          action: "扩容 PVC 或清理数据。"
+          description: "PVC 使用 15 分钟超过 85%。"
+
+  # ===========================================================================
+  # 3. Kubernetes 控制面（apiserver / scheduler）
+  # ===========================================================================
+  - name: k8s-control-plane-alerts
+    interval: 30s
+    rules:
+      - alert: K8sAPIServerDown
+        expr: up{job="apiserver", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: kubernetes
+          category: availability
+          alert_type: state
+          condition_id: k8s_apiserver_down
+          notify_profile: kubernetes
+        annotations:
+          summary: "kube-apiserver {{ $labels.instance }} 不可达 3 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "集群控制面失效。"
+          action: "kubectl get-apiserver-status；检查证书/etcd/网络。"
+          description: "apiserver 抓取失败 3 分钟。"
+
+      - alert: K8sAPIServerLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le, verb) (rate(apiserver_request_duration_seconds_bucket{alert_policy!="stress"}[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: kubernetes
+          category: performance
+          alert_type: threshold
+          condition_id: k8s_apiserver_slow
+          notify_profile: kubernetes
+        annotations:
+          summary: "apiserver {{ $labels.verb }} p99 = {{ printf \"%.2f\" $value }}s"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "1s"
+          impact: "kubectl/控制器响应慢。"
+          action: "检查 etcd 性能；控制请求规模。"
+          description: "apiserver p99 延迟超过 1s 持续 10 分钟。"

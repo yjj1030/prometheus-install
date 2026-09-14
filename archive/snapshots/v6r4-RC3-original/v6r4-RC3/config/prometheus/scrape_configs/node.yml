@@ -1,0 +1,102 @@
+# ==============================================================================
+# scrape_configs/node.yml
+#
+# Node Exporter 抓取配置（主机/虚拟机视角）
+# 适用：node_exporter 1.12.1+（由 node_exporter_installer_v4.0.0.sh 部署）
+#
+# v3.0.0-rc4 P0-04：
+#   - 文件 SD 路径用 `__PROM_FILE_SD_BASE__` 占位符（prometheus_installer 安装时替换）
+#   - 默认监听端口 ${NODE_EXPORTER_PORT} (9102)
+#   - 与 edge VM K8s 集成互不干扰
+#   - metric_relabel 白名单严格收敛 cardinality（PSI/percpu 子项已禁）
+#   - enabled_modules（NE_* 启用的 collector 列表）通过 instance 文件 SD 注入
+#
+# 02 §2.4 红线：
+#   - 不抓 http_request 之类高基线指标
+#   - cpu 指标仅保留 guest/usage/iowait，避免 percpu 爆炸
+#   - 启用 PSI 与 systemd_lites（v3 默认）
+#   - textfile collector 必须保留目录（用户提供脚本）
+# ==============================================================================
+
+scrape_configs:
+  - job_name: node_exporter
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/node/*.json'
+        refresh_interval: 60s
+
+    relabel_configs:
+      # v3.0.0-rc4 audit-blocking 修复（B03）：不再强制重写 __address__ 端口。
+      # file_sd 应直接提供完整 "主机:端口"（如 192.0.2.10:9102），模板层不做端口覆盖。
+      #
+      # v3.0.0-rc4 上线门禁 P0-1（2026-09-10）：
+      #   标签契约：job/instance 由 Prometheus 内部生成；site/origin_prometheus 由
+      #   Prometheus external_labels 注入；file_sd 只承载业务标签，不写入
+      #   job/instance/site/origin_prometheus。origin_prometheus 也不再额外拼接
+      #   "prom-edge-" 前缀，以与 Prometheus 自身 external_labels 完全一致。
+      #   job 在 scrape job_name=node_exporter 自动生成，无需 relabel 注入。
+      # 设备标签保留 (file_sd 提供)
+      - source_labels: [host]
+        target_label: host
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+      - target_label: asset_type
+        replacement: host
+      - target_label: role
+        replacement: infrastructure
+      # enabled_modules 通过 file_sd labels.enabled_modules 注入（仅记录，不参与 scrape）
+      # 实际启用由 node_exporter --collectors.enabled 控制；此处标签用于追溯
+
+    metric_relabel_configs:
+      # v3.0.0-rc4 audit-blocking 修复（B01）：
+      # 原 11 条连续 action: keep 形成交集，过滤掉全部正常指标（cpu 通过 keep1
+      # 后被 keep2 内存白名单 drop，反之亦然）。合并为单条 keep 正则，表达并集：
+      # 任一白名单命中即保留。
+      - source_labels: [__name__]
+        regex: '(node_cpu_(guest_seconds_total|seconds_total|iowait_seconds_total|usage_total)|node_memory_(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Active|Inactive|Dirty|Writeback|AnonPages|Mapped|Shmem|KernelStack|PageTables|NFS_Unstable|Bounce|CommitLimit|Committed_AS|VmallocUsed|VmallocChunk|HardwareCorrupted|AnonHugePages|CmaFree|CmaTotal|HugePages_Total|HugePages_Free|HugePages_Rsvd|HugePages_Surplus|Hugepagesize|DirectMap4k|DirectMap2M|DirectMap1G)|node_(load[0-9]+|uptime|entropy_available)|node_filesystem_(avail|files|files_free|free|inodes|inodes_free|readonly|size|device_error)|node_disk_(reads|reads_merged|read_bytes|writes|writes_merged|written_bytes|io_now|io_time_seconds_weighted|read_time_seconds|write_time_seconds|io_time_seconds|discards_completed|discarded_sectors)|node_network_(receive|transmit)_(bytes|packets|errors|drop|compressed|multicast)|node_systemd_(unit_state|units_total|unit_start_time_seconds)|node_pressure_(cpu_waiting_seconds_total|memory_stalled_seconds_total|io_stalled_seconds_total|full_stalled_seconds_total|some_stalled_seconds_total)|node_textfile_mtime_seconds|node_(sockstat|sockets|conntrack_(entries|entries_limit|inserted|insert_failed)|timex|uname)|node_hwmon_temp_celsius)[a-zA-Z0-9_]*'
+        action: keep
+      # 显式丢弃高基线 / 重复指标（drop 在 keep 之后执行；未 keep 的已被丢弃）
+      - source_labels: [__name__]
+        regex: 'node_cpu_per_cpu.*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'node_exporter_(build_info|memstats_).*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'node_network_mtu_bytes.*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'process_(cpu_seconds_total|max_fds|open_fds|resident_memory_bytes|virtual_memory_bytes|start_time_seconds|num_procs|threads).*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'go_(gc_duration_seconds|goroutines|info|memstats_).*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'promhttp_(metric_handler_requests_in_flight|metric_handler_requests_total|response_size_bytes_bucket).*'
+        action: drop
+
+  # ==============================================================================
+  # 占位目标清单（targets/node/.gitkeep）
+  # 注意：实际目标列表由用户在 targets/node/*.json 提供：
+  #
+  # {
+  #   "targets": ["192.0.2.10"],
+  #   "labels": {
+  #     "host": "vm-host-01",
+  #     "env": "prod",
+  #     "alert_policy": "prod",
+  #     "enabled_modules": "cpu,meminfo,filesystem,diskstats,netdev,systemd_unit_lites,psi"
+  #   }
+  # }
+  #
+  # 占位标记（v3.0.0-rc4 P0-04）：
+  #   此文件可独立于 prometheus.yml 主文件作为子配置被引用；
+  #   用户不安装此 job 时，由 prometheus.yml 注释中的 "scrape_configs.include"
+  #   指示省略；启用前删除 PLACEHOLDER 段
+  # PLACEHOLDER node: enabled=false
+  # ==============================================================================

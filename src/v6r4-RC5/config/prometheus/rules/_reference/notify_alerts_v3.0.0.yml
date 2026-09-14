@@ -1,0 +1,113 @@
+# ==============================================================================
+# notify_alerts_v3.0.0.yml
+#
+# 审核 P1-15: 接通真实通知 + 链路失效发现
+#
+# 链路：
+#   alertmanager -> notify-gateway (内部 notify-gateway 适配) -> IM/电话/SMS
+#       ↑
+#       | 监听自身健康（AM notify 失败 / notify-gateway 不可达）
+#
+# 当 notify-gateway 自身异常时，必须有独立告警通路（避免循环依赖）：
+#   - 通过 system unit 状态（systemd notify-gateway.service active）
+#   - 通过 notify-gateway 暴露的 /health 端点
+#   - 通过 blackbox_exporter 外部探测 notify-gateway HTTP 端点
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. notify-gateway 自身失联（中心端）
+  # ===========================================================================
+  - name: notify-gateway-availability-alerts
+    interval: 30s
+    rules:
+      - alert: NotifyGatewayDown
+        expr: probe_success{job="blackbox_http", instance=~".*:9099.*", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: emergency
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: notify_gateway_down
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "notify-gateway 不可达 3 分钟"
+          current_value: "0"
+          threshold: "probe_success == 0 持续 ≥ 3m"
+          impact: "所有 alertmanager webhook 调用失败，业务告警无法送达值班。"
+          action: "立即重启 notify-gateway；检查 notify-gateway 上游依赖。"
+          description: "中心端 notify-gateway HTTP 端点不可达 3 分钟。这是告警链路的'心脏'，失联期间所有告警发不出去。"
+
+  # ===========================================================================
+  # 2. alertmanager notify 自身失败（自身指标驱动）
+  # ===========================================================================
+  - name: alertmanager-self-monitoring-alerts
+    interval: 30s
+    rules:
+      - alert: AlertmanagerNotifyFailed
+        expr: increase(alertmanager_notifications_failed_total{alert_policy!="stress"}[10m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: am_notify_failed
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "alertmanager 在 10 分钟内通知失败 ≥ 1 次"
+          current_value: "{{ printf \"%.0f\" $value }} 次"
+          threshold: "increase(notifications_failed_total[10m]) > 0"
+          impact: "部分告警未送达。"
+          action: "查看 alertmanager 日志；定位失败 receiver。"
+          description: "alertmanager 通知发送失败计数增加；常见原因：webhook 4xx/5xx、timeout、SSL 错误。"
+
+      - alert: AlertmanagerIntegrationLimiting
+        # 触发了 alertmanager 的 integration 限流（默认 1 notify / group / 5s）
+        expr: rate(alertmanager_notification_latency_seconds_sum{alert_policy!="stress"}[5m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: alerting
+          alert_type: performance
+          condition_id: am_integration_limiting
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "alertmanager 通知平均延迟 {{ printf \"%.2f\" $value }}s"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "5s"
+          impact: "告警链路延迟显著上升；用户感知告警不及时。"
+          action: "检查 receiver 配置；考虑拆分 group_by；提高 notify-gateway 吞吐。"
+          description: "alertmanager 通知平均延迟持续 5 分钟超过 5s，可能触发 integration 限流。"
+
+  # ===========================================================================
+  # 3. 链路自证心跳（参考 watchdog_alerts_v1.0.0.yml，此处补充通知链路版本）
+  # ===========================================================================
+  - name: watchdog-notification-link
+    interval: 1m
+    rules:
+      - alert: WatchdogNotificationLinkBroken
+        expr: |
+          (
+            time() - timestamp(alertmanager_last_notification_success_timestamp_seconds{alert_policy!="stress"})
+          ) > 1800
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: watchdog_notification_link
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "alertmanager 30 分钟内无成功通知"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "距离上次成功通知 > 1800s"
+          impact: "通知链路可能已中断 30 分钟。"
+          action: "立即联系 SRE；此告警本身可能也发不出，需电话兜底。"
+          description: "链路自证：alertmanager 30 分钟内无任何成功通知记录。"
+
+# PLACEHOLDER notify-alerts: enabled=false

@@ -1,0 +1,254 @@
+# ==============================================================================
+# scrape_configs/kubernetes.yml
+#
+# Kubernetes 集群抓取配置 (kube-prometheus 简化版)
+#
+# v3.0.0-rc4 P0-04：
+#   - 拆分为 K8s 集群内（kubelet/apiserver/kube-state-metrics）与集群外
+#     （通过 file_sd 接入 pod 业务 exporter）
+#   - 集群内由 prometheus 直接以 serviceaccount 鉴权
+#   - 集群外由 file_sd + ALLOW_CIDRS 防火墙双闸门
+#   - enabled_modules（kube-state-metrics enabled resource）通过
+#     file_sd labels.enabled_modules 注入，仅作追溯
+#
+# 02 §2.4 红线：
+#   - kubelet 仅抓 8 个白名单端点；不抓全量 /metrics（包含 tcp/udp/sched/percpu）
+#     白名单端点:
+#       /api/v1/nodes/{name}/proxy/metrics/cadvisor
+#       /api/v1/nodes/{name}/proxy/metrics/resource
+#       /api/v1/nodes/{name}/proxy/metrics/probes
+#       /api/v1/nodes/{name}/proxy/metrics/healthz
+#       /api/v1/nodes/{name}/proxy/metrics/checkpoint
+#       /metrics              (限白名单: apiserver_authorization_decisions
+#                                     apiserver_audit_event_total
+#                                     apiserver_client_certificate_expiration_seconds_count
+#                                     apiserver_observed_request_slots
+#                                     apiserver_request_terminations_total
+#                                     apiserver_self_health_check_count
+#                                     apiserver_storage_lock_duration_seconds_bucket
+#                                     apiserver_storage_objects)
+#   - K8s cAdvisor 必走 kubelet /metrics/cadvisor（不部署独立 cAdvisor）
+#
+# PLACEHOLDER kubernetes: enabled=false
+#   启用需满足：
+#     1. /var/run/secrets/kubernetes.io/serviceaccount/ca.crt 可读
+#     2. role: node 的 RBAC 已授予
+#     3. 中心端 Prometheus 通过 ingress 或 nodeport 与 API server 通信
+# ==============================================================================
+
+# ===========================================================================
+# PART A: K8s 集群内（不依赖 file_sd；走 serviceaccount 鉴权）
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Kubernetes API Server
+# ---------------------------------------------------------------------------
+scrape_configs:
+  - job_name: apiserver
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [default]
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: false
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+      - target_label: job
+        replacement: apiserver
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: control_plane
+
+  # ---------------------------------------------------------------------------
+  # 2. kubelet cAdvisor（容器视角）—— 02 §2.4 唯一推荐的容器指标来源
+  # ---------------------------------------------------------------------------
+  - job_name: kubelet-cadvisor
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+      - target_label: job
+        replacement: kubelet-cadvisor
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: node
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+
+  # ---------------------------------------------------------------------------
+  # 3. kubelet /metrics/resource（节点级资源）
+  # 含 kubelet_volume_stats_* (PVC 告警依赖)
+  # ---------------------------------------------------------------------------
+  - job_name: kubelet-resource
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/resource
+      - target_label: job
+        replacement: kubelet-resource
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: node
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+
+  # ---------------------------------------------------------------------------
+  # 4. kubelet /metrics/probes（探针状态）
+  # ---------------------------------------------------------------------------
+  - job_name: kubelet-probes
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'prober_(probe_total|probe_duration_seconds_count).*'
+        action: keep
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/probes
+      - target_label: job
+        replacement: kubelet-probes
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: node
+
+  # ---------------------------------------------------------------------------
+  # 5. kube-state-metrics（工作负载状态）
+  # ---------------------------------------------------------------------------
+  - job_name: kube-state-metrics
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [kube-system]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: kube-state-metrics
+      - source_labels: [__meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: http
+      - target_label: job
+        replacement: kube-state-metrics
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: control_plane
+
+  # ---------------------------------------------------------------------------
+  # 6. node-exporter (DaemonSet 或独立部署)
+  # ---------------------------------------------------------------------------
+  - job_name: kubernetes-nodes
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [monitoring]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: node-exporter
+      - source_labels: [__meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: http
+      - target_label: job
+        replacement: kubernetes-nodes
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: node
+
+  # ===========================================================================
+  # PART B: K8s 集群外（依赖 file_sd；ALLOW_CIDRS 防火墙 + labels.enabled_modules）
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # 7. Pod 业务 exporter（由 users 通过 file_sd 在 targets/kubernetes/*.json 提供）
+  # ---------------------------------------------------------------------------
+  # 审核 §12.4 P0-04: file_sd 不会产生 __meta_kubernetes_* 元标签
+  # file_sd 目标应直接包含 namespace/pod/container 等标签
+  #   enabled_modules 字段记录该 pod 启用的 kube_* resource
+  - job_name: kubernetes-pods
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/kubernetes/*.json'
+        refresh_interval: 30s
+    relabel_configs:
+      - target_label: job
+        replacement: kubernetes-pods
+      - target_label: asset_type
+        replacement: kubernetes
+      - target_label: role
+        replacement: workload
+      # 保留 namespace/pod/container 等 file_sd 标签
+      - source_labels: [namespace]
+        target_label: namespace
+      - source_labels: [pod]
+        target_label: pod
+      - source_labels: [container]
+        target_label: container
+      # enabled_modules 留作追溯（不参与 scrape 行为）
+      - source_labels: [enabled_modules]
+        target_label: enabled_modules
+      # 站点与环境标签
+      - source_labels: [site]
+        target_label: site
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+
+  # ==============================================================================
+  # 占位目标示例（targets/kubernetes/.gitkeep）：
+  # 注意：Pod 业务 exporter 不在内网鉴权范围，必须走 file_sd + 防火墙白名单
+  #
+  # {
+  #   "targets": ["198.51.100.110:9100"],
+  #   "labels": {
+  #     "namespace": "production",
+  #     "pod": "checkout-api-7f8b9c-xj2k4",
+  #     "container": "checkout",
+  #     "site": "primary",
+  #     "env": "prod",
+  #     "alert_policy": "prod",
+  #     "enabled_modules": "kube_pod_container_status,kube_pod_container_resource_requests"
+  #   }
+  # }
+  # ==============================================================================
+  # PLACEHOLDER kubernetes-pods: enabled=false
+  # ==============================================================================

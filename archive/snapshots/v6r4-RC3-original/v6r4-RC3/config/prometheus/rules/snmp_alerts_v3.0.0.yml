@@ -1,0 +1,367 @@
+# ==============================================================================
+# snmp_alerts_v3.0.0.yml
+#
+# 网络设备（交换机/路由器）告警
+# 由 snmp_exporter 0.28.0 暴露的 if_* / sysUpTime 等指标驱动
+#
+# 红线（02 §2.3）：
+#   - 0.28.0 BREAKING: sysUpTime 从 if_mib 移到 system 模块
+#     scrape 必须 module=[if_mib, system]（见 scrape_configs/snmp.yml）
+#   - 接口告警必须有白名单/角色前置（ifAlias/ifName 正则过滤）
+#     监控目标 file_sd 必须携带 device_role + interface_whitelist_regex
+#   - community 不进标签（02 §2.1 标签禁区）
+#
+# 标签契约：六标签 + 六元组 annotations
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 接口状态（state，依赖白名单）
+  # ===========================================================================
+  - name: snmp-iface-status-alerts
+    interval: 30s
+    rules:
+      - alert: SwitchInterfaceDown
+        expr: |
+          (ifOperStatus != 1 and ifOperStatus != 5)
+          and on (instance, device, ifName, ifIndex)
+          ifOperStatus{alert_policy!="stress"}
+          * on (instance, device) group_left() (label_replace(up{job="snmp_exporter"}, "device", "$1", "instance", "(.+):.*"))
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: network_device
+          category: availability
+          alert_type: state
+          condition_id: switch_iface_down
+          notify_profile: network_device
+        annotations:
+          summary: "交换机 {{ $labels.instance }} {{ $labels.ifName }} 状态非 up"
+          current_value: "ifOperStatus={{ printf \"%.0f\" $value }}"
+          threshold: "ifOperStatus ∉ {1,5} 持续 ≥ 3m"
+          impact: "承载业务中断。"
+          action: "登录交换机查看端口；排查物理链路/配置。"
+          description: "ifOperStatus 持续 3 分钟非 up/adminDown；若 ifAdminStatus=down 属人为停用。"
+
+      - alert: SwitchInterfaceErrIncreasing
+        expr: rate(ifInErrors{alert_policy!="stress"}[5m]) + rate(ifOutErrors{alert_policy!="stress"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: performance
+          alert_type: threshold
+          condition_id: switch_iface_err
+          notify_profile: network_quality
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 错误包速率 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "1/s"
+          impact: "传输重传增加，业务时延上升。"
+          action: "检查端口 CRC/丢包；必要时更换跳线/模块。"
+          description: "in+out 错误包速率 10 分钟超过 1/s。"
+
+      - alert: SwitchInterfaceErrHigh
+        expr: rate(ifInErrors{alert_policy!="stress"}[5m]) + rate(ifOutErrors{alert_policy!="stress"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: network_device
+          category: performance
+          alert_type: threshold
+          condition_id: switch_iface_err
+          notify_profile: network_quality
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 错误包严重 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "10/s"
+          impact: "业务严重受影响。"
+          action: "立即切走该端口流量，排查物理/光模块。"
+          description: "in+out 错误包速率 5 分钟超过 10/s。"
+
+      - alert: SwitchInterfaceUtilHigh
+        expr: (ifInOctets{alert_policy!="stress"} + ifOutOctets{alert_policy!="stress"}) * 8 / ifSpeed{alert_policy!="stress"} * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: capacity
+          alert_type: capacity
+          condition_id: switch_iface_util
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 利用率 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "拥塞风险。"
+          action: "查看流量来源，扩容链路或 QoS。"
+          description: "端口利用率 15 分钟超过 80%。"
+
+      - alert: SwitchInterfaceUtilCritical
+        expr: (ifInOctets{alert_policy!="stress"} + ifOutOctets{alert_policy!="stress"}) * 8 / ifSpeed{alert_policy!="stress"} * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: network_device
+          category: capacity
+          alert_type: capacity
+          condition_id: switch_iface_util
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 带宽近饱和 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "丢包概率显著升高。"
+          action: "立即启用 QoS 或紧急扩容。"
+          description: "端口利用率 5 分钟超过 95%。"
+
+  # ===========================================================================
+  # 2. 设备可用性（state）
+  # ===========================================================================
+  - name: snmp-device-availability-alerts
+    interval: 30s
+    rules:
+      - alert: SwitchDown
+        expr: up{job=~"snmp_exporter.*", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: network_device
+          category: availability
+          alert_type: state
+          condition_id: switch_down
+          notify_profile: network_device
+        annotations:
+          summary: "网络设备 {{ $labels.instance }} SNMP 不可达 3 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "全网段监控失效。"
+          action: "ping/SSH 设备；检查 ACL/community。"
+          description: "snmp_exporter 抓取失败 3 分钟。"
+
+      - alert: SwitchUnreachable
+        expr: up{job=~"snmp_exporter.*", alert_policy!="stress"} == 0
+        for: 15m
+        labels:
+          severity: emergency
+          asset_type: network_device
+          category: availability
+          alert_type: state
+          condition_id: switch_down
+          notify_profile: network_device
+        annotations:
+          summary: "网络设备 {{ $labels.instance }} 持续不可达 15 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 15m"
+          impact: "承载业务可能已完全中断。"
+          action: "立即协同现场介入。"
+          description: "设备持续 15 分钟不可达。"
+
+  # ===========================================================================
+  # 3. 设备重启（依赖 system 模块的 sysUpTime，02 §2.3 红线）
+  # ===========================================================================
+  - name: snmp-device-restart-alerts
+    interval: 1m
+    rules:
+      - alert: SwitchRebooted
+        expr: changes(snmp_sysUpTime{alert_policy!="stress"}[10m]) > 1
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: availability
+          alert_type: event
+          condition_id: switch_rebooted
+          notify_profile: network_device
+        annotations:
+          summary: "{{ $labels.instance }} 在 10 分钟内发生过重启"
+          current_value: "{{ printf \"changes=%v\" $value }}"
+          threshold: "sysUpTime 下降 ≥ 1 次/10m"
+          impact: "管理面可能丢失会话；控制平面短暂中断。"
+          action: "查看设备日志确认重启原因；版本升级/异常掉电区分。"
+          description: "sysUpTime 在 10 分钟内出现反向变化，设备已重启。"
+
+# 审核 P1-07: 接口状态/吞吐/重启识别增强
+#   - 接口错误按 in/out 分开（之前求和，定位不清晰）
+#   - 接口吞吐按 in/out 分别告警（之前求和，无法识别拥塞方向）
+#   - 重启识别补充：30 分钟连续重启 + 短 sysUpTime（≤5min）反复重启
+# ==============================================================================
+
+  # ===========================================================================
+  # P1-07: 接口错误方向拆分（补充）
+  # ===========================================================================
+  - name: snmp-iface-direction-alerts
+    interval: 30s
+    rules:
+      - alert: SwitchInterfaceInErrHigh
+        expr: rate(ifInErrors{alert_policy!="stress"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: performance
+          alert_type: threshold
+          condition_id: switch_iface_in_err
+          notify_profile: network_quality
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 入方向错误 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "1/s"
+          impact: "下行链路质量问题；本地可能是受害方。"
+          action: "检查本端光模块/跳线；若对端告警同步出现，怀疑链路整体质量。"
+          description: "入方向错误包速率 10 分钟超过 1/s。"
+
+      - alert: SwitchInterfaceOutErrHigh
+        expr: rate(ifOutErrors{alert_policy!="stress"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: performance
+          alert_type: threshold
+          condition_id: switch_iface_out_err
+          notify_profile: network_quality
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 出方向错误 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "1/s"
+          impact: "上游路径拥塞或本端发送失败。"
+          action: "检查本端发送队列；与对端 inErr 比对判断方向。"
+          description: "出方向错误包速率 10 分钟超过 1/s。"
+
+      - alert: SwitchInterfaceInUtilHigh
+        expr: ifInOctets{alert_policy!="stress"} * 8 / ifSpeed{alert_policy!="stress"} * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: capacity
+          alert_type: capacity
+          condition_id: switch_iface_in_util
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 入方向利用率 {{ printf \"%.1f\" $value }}% > 80%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "下行链路拥塞，本端将丢包。"
+          action: "评估扩容下行链路或启用 QoS。"
+          description: "入方向端口利用率 15 分钟超过 80%。"
+
+      - alert: SwitchInterfaceOutUtilHigh
+        expr: ifOutOctets{alert_policy!="stress"} * 8 / ifSpeed{alert_policy!="stress"} * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: capacity
+          alert_type: capacity
+          condition_id: switch_iface_out_util
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.ifName }} 出方向利用率 {{ printf \"%.1f\" $value }}% > 80%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "上行拥塞；下游可能受影响。"
+          action: "评估扩容上行链路或 QoS。"
+          description: "出方向端口利用率 15 分钟超过 80%。"
+
+  # ===========================================================================
+  # P1-07: 设备重启识别补充
+  # ===========================================================================
+  - name: snmp-device-restart-extra-alerts
+    interval: 1m
+    rules:
+      - alert: SwitchRebootStorm
+        expr: changes(snmp_sysUpTime{alert_policy!="stress"}[30m]) > 3
+        labels:
+          severity: critical
+          asset_type: network_device
+          category: availability
+          alert_type: event
+          condition_id: switch_reboot_storm
+          notify_profile: network_device
+        annotations:
+          summary: "{{ $labels.instance }} 在 30 分钟内重启 ≥ 4 次（重启风暴）"
+          current_value: "{{ printf \"changes=%v\" $value }}"
+          threshold: "sysUpTime 下降 ≥ 4 次/30m"
+          impact: "管理面反复掉线；控制平面频繁重收敛。"
+          action: "立即现场介入；怀疑电源/版本异常/硬件故障。"
+          description: "sysUpTime 在 30 分钟内出现 4 次以上反向变化，设备进入 reboot storm。"
+
+      - alert: SwitchJustRebooted
+        expr: snmp_sysUpTime{alert_policy!="stress"} < 300
+        for: 5m
+        labels:
+          severity: info
+          asset_type: network_device
+          category: availability
+          alert_type: state
+          condition_id: switch_recently_rebooted
+          notify_profile: network_device
+        annotations:
+          summary: "{{ $labels.instance }} sysUpTime={{ printf \"%.0f\" $value }}s（最近 5 分钟内重启）"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "sysUpTime < 300s"
+          impact: "设备刚刚重启；监控采集需等待 SNMP walk 收敛。"
+          action: "结合 syslog 确认重启原因；如非预期立即排查。"
+          description: "设备 sysUpTime 持续 5 分钟低于 300 秒，刚完成启动。"
+
+  # ===========================================================================
+  # 4. 设备 CPU / 内存 / 温度（threshold）
+  # ===========================================================================
+  - name: snmp-device-health-alerts
+    interval: 60s
+    rules:
+      - alert: SwitchCPUHigh
+        expr: 100 - (avg by (instance) (rate(snmp_cpu_idle{alert_policy!="stress"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: resource
+          alert_type: threshold
+          condition_id: switch_cpu_high
+          notify_profile: resource_cpu
+        annotations:
+          summary: "{{ $labels.instance }} CPU {{ printf \"%.1f\" $value }}% > 85%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "85%"
+          impact: "管理面/控制面响应迟缓。"
+          action: "查看是否有大量异常流量/管理连接。"
+          description: "设备 CPU 利用率持续 10 分钟超过 85%。"
+
+      - alert: SwitchMemHigh
+        expr: 100 - (snmp_mem_available_bytes{alert_policy!="stress"} / snmp_mem_total_bytes{alert_policy!="stress"}) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: resource
+          alert_type: threshold
+          condition_id: switch_mem_high
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 内存使用 {{ printf \"%.1f\" $value }}% > 90%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "90%"
+          impact: "新建连接/路由条目可能失败。"
+          action: "结合设备日志排查泄漏。"
+          description: "设备内存使用 10 分钟超过 90%。"
+
+      - alert: SwitchTempHigh
+        expr: snmp_sensor_value{alert_policy!="stress"} > 60
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: network_device
+          category: hardware
+          alert_type: threshold
+          condition_id: switch_temp_high
+          notify_profile: system_limit
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.sensor }} = {{ printf \"%.1f\" $value }}°C"
+          current_value: "{{ printf \"%.1f\" $value }}°C"
+          threshold: "60°C"
+          impact: "硬件降频甚至损坏风险。"
+          action: "检查机房空调与设备风扇。"
+          description: "温度传感器持续 15 分钟高于 60°C。"

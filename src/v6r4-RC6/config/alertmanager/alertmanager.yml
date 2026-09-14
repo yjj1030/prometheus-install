@@ -1,0 +1,433 @@
+# ==============================================================================
+# Alertmanager v0.34.0 路由/抑制/接收器配置 (v3)
+#
+# 二维路由: notify_profile (故障域) × severity
+#   notify_profile (15 个, 01 §2.4):
+#     availability / monitoring_agent / resource_cpu / resource_memory
+#     capacity_filesystem / capacity_forecast / performance_storage
+#     network_bandwidth / network_quality / system_limit / event
+#     web_availability / security_cert / network_device / container / kubernetes
+#   severity: info / warning / critical / emergency
+#
+# 适配 AM 0.34:
+#   - matchers 新语法（match/match_re 已废弃, 此处全部 matchers=）
+#   - time_intervals（非 mute_time_intervals）
+#   - notifications_failed_total reason = authError / rateLimited / clientError
+#
+# 部署位置: /usr/local/alertmanager/config/alertmanager.yml
+# ==============================================================================
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: ''
+  smtp_from: 'alertmanager@{{ template "email.from" . }}'
+  smtp_require_tls: true
+
+templates:
+  - '/usr/local/alertmanager/templates/*.tmpl'
+
+# ------------------------------------------------------------------------------
+# 顶级路由
+# 顺序：先 emergency（任意 profile）→ 运维 oncall
+#       再按 notify_profile 细分 → 各域值班组
+# ------------------------------------------------------------------------------
+route:
+  receiver: default-null
+  group_by:
+    - alertname
+    - severity
+    - site
+    - origin_prometheus
+    - job
+    - condition_id
+    - notify_profile
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+
+    # ==========================================================================
+    # 0. Watchdog 心跳 - 单独 receiver，不参与抑制，1h 周期
+    # ==========================================================================
+    - receiver: watchdog-heartbeat
+      matchers:
+        - alertname="WatchdogPing"
+      repeat_interval: 1h
+      group_wait: 5s
+      group_interval: 5m
+
+    # ==========================================================================
+    # 1. emergency 任意 profile → oncall 立即上报
+    # ==========================================================================
+    - receiver: oncall-emergency
+      matchers:
+        - severity="emergency"
+      repeat_interval: 15m
+      group_wait: 5s
+      group_interval: 1m
+      continue: false
+
+    # ==========================================================================
+    # 2. 业务可用性 web_availability → 应用/业务线
+    # ==========================================================================
+    - receiver: ops-app-critical
+      matchers:
+        - notify_profile="web_availability"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: ops-app-warning
+      matchers:
+        - notify_profile="web_availability"
+        - severity="warning"
+      repeat_interval: 2h
+
+    - receiver: ops-app-info
+      matchers:
+        - notify_profile="web_availability"
+        - severity="info"
+      repeat_interval: 24h
+
+    # ==========================================================================
+    # 3. 安全证书 security_cert → 安全团队
+    # ==========================================================================
+    - receiver: sec-cert-critical
+      matchers:
+        - notify_profile="security_cert"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: sec-cert-warning
+      matchers:
+        - notify_profile="security_cert"
+        - severity=~"warning|info"
+      repeat_interval: 4h
+
+    # ==========================================================================
+    # 4. 网络设备 network_device → 网络运维
+    # ==========================================================================
+    - receiver: netops-device-critical
+      matchers:
+        - notify_profile="network_device"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: netops-device-warning
+      matchers:
+        - notify_profile="network_device"
+        - severity="warning"
+      repeat_interval: 2h
+
+    # ==========================================================================
+    # 5. Kubernetes / Container → 平台 SRE
+    # ==========================================================================
+    - receiver: sre-k8s-critical
+      matchers:
+        - notify_profile="kubernetes"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: sre-k8s-warning
+      matchers:
+        - notify_profile="kubernetes"
+        - severity=~"warning|info"
+      repeat_interval: 2h
+
+    - receiver: sre-container-critical
+      matchers:
+        - notify_profile="container"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: sre-container-warning
+      matchers:
+        - notify_profile="container"
+        - severity=~"warning|info"
+      repeat_interval: 2h
+
+    # ==========================================================================
+    # 6. monitoring_agent → 自监控（夜班值守，warning 不重发）
+    # ==========================================================================
+    - receiver: sre-monitoring-critical
+      matchers:
+        - notify_profile="monitoring_agent"
+        - severity="critical"
+      repeat_interval: 30m
+
+    - receiver: sre-monitoring-warning
+      matchers:
+        - notify_profile="monitoring_agent"
+        - severity=~"warning|info"
+      repeat_interval: 12h
+
+    # ==========================================================================
+    # 7. capacity_* forecast 单独路由（提前 4h 介入，运维群）
+    # ==========================================================================
+    - receiver: sre-capacity-forecast
+      matchers:
+        - notify_profile="capacity_forecast"
+      repeat_interval: 4h
+
+    # ==========================================================================
+    # 8. resource_cpu / resource_memory / capacity_filesystem / performance_storage /
+    #    network_bandwidth / network_quality / system_limit / event / availability
+    #    统一归到 ops-infra（基础设施运维群）
+    # ==========================================================================
+    - receiver: ops-infra-critical
+      matchers:
+        - notify_profile=~"availability|resource_cpu|resource_memory|capacity_filesystem|performance_storage|network_bandwidth|network_quality|system_limit|event"
+        - severity="critical"
+      repeat_interval: 1h
+
+    - receiver: ops-infra-warning
+      matchers:
+        - notify_profile=~"availability|resource_cpu|resource_memory|capacity_filesystem|performance_storage|network_bandwidth|network_quality|system_limit|event"
+        - severity="warning"
+      repeat_interval: 4h
+
+    - receiver: ops-infra-info
+      matchers:
+        - notify_profile=~"availability|resource_cpu|resource_memory|capacity_filesystem|performance_storage|network_bandwidth|network_quality|system_limit|event"
+        - severity="info"
+      repeat_interval: 24h
+
+# ------------------------------------------------------------------------------
+# 时间静默 (AM 0.34: time_intervals，非 mute_time_intervals)
+# ------------------------------------------------------------------------------
+time_intervals:
+  - name: weekday-nights
+    time_intervals:
+      - times:
+          - start_time: '22:00'
+            end_time: '08:00'
+        weekdays: ['monday:friday']
+        location: Asia/Shanghai
+
+  - name: weekends
+    time_intervals:
+      - weekdays: ['saturday', 'sunday']
+        location: Asia/Shanghai
+
+  - name: weekday-business-hours
+    time_intervals:
+      - times:
+          - start_time: '09:00'
+            end_time: '18:00'
+        weekdays: ['monday:friday']
+        location: Asia/Shanghai
+
+# ------------------------------------------------------------------------------
+# 抑制规则
+# 02 §6.2: equal 键必须能在 alert 上找到；不存在的 label 会导致抑制不生效
+# 全量 10 键恒存在的策略在告警规则侧通过 label_replace / vmalert 注入保障
+# ------------------------------------------------------------------------------
+inhibit_rules:
+
+  # emergency 抑制 critical / warning / info
+  - source_matchers:
+      - severity="emergency"
+    target_matchers:
+      - severity=~"critical|warning|info"
+    equal:
+      - condition_id
+      - site
+      - origin_prometheus
+      - job
+      - instance
+      - device
+      - mountpoint
+      - namespace
+      - pod
+      - container
+
+  # critical 抑制 warning / info
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity=~"warning|info"
+    equal:
+      - condition_id
+      - site
+      - origin_prometheus
+      - job
+      - instance
+      - device
+      - mountpoint
+      - namespace
+      - pod
+      - container
+
+  # warning 抑制 info
+  - source_matchers:
+      - severity="warning"
+    target_matchers:
+      - severity="info"
+    equal:
+      - condition_id
+      - site
+      - origin_prometheus
+      - job
+      - instance
+      - device
+      - mountpoint
+      - namespace
+      - pod
+      - container
+
+  # NodeDown 抑制所有该实例上的子告警（防风暴）
+  - source_matchers:
+      - alertname="NodeDown"
+    target_matchers:
+      - alertname!="NodeDown"
+    equal:
+      - instance
+      - site
+
+  # SwitchDown 抑制该设备所有接口告警
+  - source_matchers:
+      - alertname="SwitchDown"
+    target_matchers:
+      - alertname!~"SwitchDown|SwitchUnreachable"
+    equal:
+      - instance
+      - site
+
+  # WebSiteDown 抑制该 URL 的 WebSiteDegraded5xx / Slow（仅同 instance）
+  - source_matchers:
+      - alertname=~"WebSiteDown.*"
+    target_matchers:
+      - alertname=~"WebSiteDegraded5xx|WebSiteSlow.*"
+    equal:
+      - instance
+      - site
+
+  # K8sNodeDown 抑制该 node 上的 Pod 告警
+  - source_matchers:
+      - alertname=~"K8sNode(NotReady|Unreachable)"
+    target_matchers:
+      - alertname=~"K8sPod.*|K8sDeployment.*|K8sStatefulSet.*|ContainerKilled"
+    equal:
+      - node
+      - site
+
+# ------------------------------------------------------------------------------
+# 接收器
+# webhook 中转服务（部署位置：中心端 vmalert/notify-gateway）默认 127.0.0.1:9099
+# 由 installers/common/platform.sh 在中心端启用 basic auth 监听
+# ------------------------------------------------------------------------------
+receivers:
+
+  - name: default-null
+
+  # ---- 应用/业务线 ----
+  - name: ops-app-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/app-critical'
+        send_resolved: true
+        max_alerts: 50
+
+  - name: ops-app-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/app-warning'
+        send_resolved: true
+        max_alerts: 200
+
+  - name: ops-app-info
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/app-info'
+        send_resolved: true
+
+  # ---- 安全证书 ----
+  - name: sec-cert-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sec-cert-critical'
+        send_resolved: true
+        max_alerts: 100
+
+  - name: sec-cert-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sec-cert-warning'
+        send_resolved: true
+
+  # ---- 网络运维 ----
+  - name: netops-device-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/netops-critical'
+        send_resolved: true
+        max_alerts: 100
+
+  - name: netops-device-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/netops-warning'
+        send_resolved: true
+
+  # ---- 平台 SRE（K8s/Container/Monitoring） ----
+  - name: sre-k8s-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-k8s-critical'
+        send_resolved: true
+        max_alerts: 100
+
+  - name: sre-k8s-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-k8s-warning'
+        send_resolved: true
+
+  - name: sre-container-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-container-critical'
+        send_resolved: true
+        max_alerts: 100
+
+  - name: sre-container-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-container-warning'
+        send_resolved: true
+
+  - name: sre-monitoring-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-monitoring-critical'
+        send_resolved: true
+        max_alerts: 50
+
+  - name: sre-monitoring-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-monitoring-warning'
+        send_resolved: true
+
+  - name: sre-capacity-forecast
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/sre-capacity-forecast'
+        send_resolved: true
+
+  # ---- 基础设施运维 ----
+  - name: ops-infra-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/infra-critical'
+        send_resolved: true
+        max_alerts: 200
+
+  - name: ops-infra-warning
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/infra-warning'
+        send_resolved: true
+        max_alerts: 500
+
+  - name: ops-infra-info
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/infra-info'
+        send_resolved: true
+
+  # ---- 24x7 oncall（电话/短信，示例保留 webhook 备用通道）----
+  - name: oncall-emergency
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/oncall-emergency'
+        send_resolved: true
+        max_alerts: 20
+
+  # ---- Watchdog（链路自证，不走时间静默）----
+  - name: watchdog-heartbeat
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/webhook/watchdog'
+        send_resolved: true
+        max_alerts: 1

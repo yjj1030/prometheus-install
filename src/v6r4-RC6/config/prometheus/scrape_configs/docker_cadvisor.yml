@@ -1,0 +1,104 @@
+# ==============================================================================
+# scrape_configs/docker_cadvisor.yml
+#
+# Docker 主机 cAdvisor 抓取配置 (cAdvisor 0.49.1)
+# 部署方式: 由 cadvisor_installer_v1.0.0.sh install 以容器方式运行
+#            默认监听 ${PORT} (8088)
+#
+# 02 §2.4 红线：
+#   - container_scrape_error 在 0.49.1 不存在；健康判断走 up + container_last_seen
+#   - cAdvisor 自带的 container_* 指标已覆盖主机维度（pod/namespace 需 K8s 集成）
+#   - metric_relabel 白名单收敛 cardinality
+#
+# v3.0.0-rc4: file_sd 路径用 `__PROM_FILE_SD_BASE__` 占位符替代硬编码
+#             /usr/local/prometheus/prometheus-9090/etc/targets，适配
+#             --port / INSTALL_ROOT 自定义场景
+# ==============================================================================
+
+scrape_configs:
+  - job_name: docker_cadvisor
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/docker/*.json'
+        refresh_interval: 30s
+    relabel_configs:
+      # v3.0.0-rc4 audit-blocking 修复（B03）：
+      #   - 删除强制端口重写 '${1}:8088'；file_sd 直接提供完整地址（含 19180 等真实端口）
+      #   - ${1:-$HOSTNAME} 是 bash 默认值语法，Prometheus 不识别；改用安装期替换变量
+      - target_label: job
+        replacement: docker_cadvisor
+      - target_label: asset_type
+        replacement: container_host
+      - target_label: role
+        replacement: container
+      - source_labels: [host]
+        target_label: host
+      - source_labels: [site]
+        target_label: site
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+      # 注入 origin_prometheus（installer 在 render 时替换 ${ORIGIN_PROMETHEUS}）
+      - target_label: origin_prometheus
+        replacement: 'prom-edge-${ORIGIN_PROMETHEUS}'
+
+    metric_relabel_configs:
+      # v3.0.0-rc4 audit-blocking 修复（B01）：
+      # 原 2 条连续 action: keep 形成交集，过滤掉全部正常指标。
+      # 合并为单条 keep 正则，表达并集：任一白名单命中即保留。
+      # 容器级指标白名单 (cAdvisor 0.49.1 实际存在的 metric 名称)
+      # 审核 P1-09: 容器规则指标必须保留（含 spec_* 限额，否则告警 expr 引用即失败）
+      - source_labels: [__name__]
+        regex: '(container_(cpu_usage_seconds_total|cpu_cfs_throttled_periods_total|cpu_cfs_throttled_seconds_total|cpu_cfs_periods_total|spec_cpu_quota|spec_cpu_period|memory_usage_bytes|memory_limit_bytes|spec_memory_limit_bytes|memory_working_set_bytes|memory_failures_total|oom_events_total|last_seen|network_(receive|transmit)_(bytes|packets)_total|filesystem_(usage|limit)_bytes|tasks_state|start_time_seconds)|container_fs_(inodes_free|inodes_total|usage_bytes|limit_bytes|sector_reads_total|sector_writes_total))[a-zA-Z0-9_]*'
+        action: keep
+      # machine_event / machine_memory_bytes 不需要（主机由 node_exporter 覆盖）
+      - source_labels: [__name__]
+        regex: 'machine_.*'
+        action: drop
+      # container_start_time_seconds 干扰（与重启告警混淆）；spec_*_limit 保留
+      - source_labels: [__name__]
+        regex: '^container_start_time_seconds$'
+        action: drop
+      # 仅为容器（container != pod/sandbox）；system.slice 与 systemd service 不关注
+      # 审核 P1-10: cAdvisor 适配真实容器运行环境
+      #   - cgroup v1: /system.slice/<svc>.service 或 /kubepods/...
+      #   - cgroup v2: /system.slice/<svc>.service 或 /kubepods.slice/...
+      #   - pause 容器 (k8s_POD_*) 是每个 pod 的基础设施容器，不业务化
+      #   - 短生命周期 init 容器 (image 中带 :init) 可能干扰统计
+      - source_labels: [name]
+        regex: '^$|^/system.slice/.+|.+\.service$|^k8s_(POD|sandbox)_'
+        action: drop
+      # init 容器过滤（initContainer 已退出但 metrics 仍上报）
+      - source_labels: [name]
+        regex: '.+:.+-init$'
+        action: drop
+      # id 为空的多半是 sandbox
+      - source_labels: [id]
+        regex: '^/kubepods/.*/sandboxes/.*'
+        action: drop
+      # 审核 P1-10: cAdvisor 重命名 (container_label_*) 注入业务标签
+      # 用户可在 docker run 时加 --label=service=foo --label=team=bar
+      # 这些 label 会成为 container_label_service / container_label_team 指标
+      - source_labels: [__name__]
+        regex: 'container_label_(service|team|env|version|app|component)[a-zA-Z0-9_]*'
+        action: keep
+
+  # ==============================================================================
+  # 目标清单示例 (targets/docker/docker-host-01.json):
+  # ==============================================================================
+  #
+  # {
+  #   "targets": ["192.0.2.11"],
+  #   "labels": {
+  #     "host": "docker-host-01",
+  #     "site": "primary",
+  #     "env": "prod",
+  #     "alert_policy": "prod"
+  #   }
+  # }
+  #
+  # ==============================================================================

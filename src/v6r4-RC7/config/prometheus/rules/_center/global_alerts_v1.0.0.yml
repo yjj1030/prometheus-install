@@ -1,0 +1,387 @@
+# ==============================================================================
+# global_alerts_v1.0.0.yml
+#
+# 全局/中心层告警，由 vmalert 在 center 端加载（03 §2.3）
+# 数据源：远端 VM（跨 site 聚合）、本地下钻查询
+#
+# 覆盖维度：
+#   1. 跨站点容量与可用性
+#   2. SLO burn-rate（采集可用率 / 数据送达 / 告警送达）
+#   3. 数据平面健康（数据缺失、迟到、孤岛）
+#   4. VM / vmalert / vmauth / Grafana 自监控
+#
+# 标签契约：同 01 §2.4（六标签）+ 六元组 annotations
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 跨站点容量（VM 上聚合查询）
+  # ===========================================================================
+  - name: cross-site-capacity-alerts
+    interval: 5m
+    rules:
+      - alert: CrossSiteProbeAvailabilityLow
+        expr: |
+          (
+            sum(up{job=~"blackbox-.*"}) by (job)
+            /
+            count(up{job=~"blackbox-.*"}) by (job)
+          ) * 100 < 95
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: threshold
+          condition_id: cross_site_probe_avail
+          notify_profile: web_availability
+        annotations:
+          summary: "跨站点 job={{ $labels.job }} 黑盒可用率 {{ printf \"%.1f\" $value }}% < 95% (30m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "采集可用率 SLO（03 §3.4）受影响。"
+          action: "按 site 维度下钻，定位异常 site。"
+          description: "30 分钟跨站点采集可用率低于 95%。"
+
+      - alert: CrossSiteNodeDownTooMany
+        expr: count(up{job="node_exporter", alert_policy!="stress"} == 0) by (site) > 3
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: cross_site_node_down
+          notify_profile: availability
+        annotations:
+          summary: "site={{ $labels.site }} 同时 down {{ printf \"%.0f\" $value }} 台主机"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "> 3"
+          impact: "该 site 大面积不可达；可能机房/专线故障。"
+          action: "协同机房/网络；按 DR 流程切换。"
+          description: "10 分钟内单 site 多于 3 台主机同时不可达。"
+
+  # ===========================================================================
+  # 2. SLO burn-rate（多窗口多燃烧率，Google SRE Workbook 风格）
+  # ===========================================================================
+  - name: slo-burn-rate-alerts
+    interval: 1m
+    rules:
+      # ----- 采集可用率 SLO（目标 99.9%） -----
+      - alert: ProbeAvailabilitySLOBurnFast
+        expr: |
+          (
+            (1 - (
+              sum(rate(up{job=~"blackbox-.*"}[1h]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )) * 100 > (100 - 99.9) * 14.4
+          )
+        for: 2m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: threshold
+          condition_id: probe_availability_slo_burn
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 SLO 1h 燃烧率 {{ printf \"%.2f\" $value }}x > 14.4x"
+          current_value: "{{ printf \"%.2f\" $value }}x"
+          threshold: "14.4x 1h 窗口"
+          impact: "如持续将消耗月度预算。"
+          action: "立即排查 blackbox_exporter 与探测目标。"
+          description: "1 小时窗口 SLO 燃烧率 > 14.4（Google SRE 2% 预算快燃）。"
+
+      - alert: ProbeAvailabilitySLOBurnSlow
+        expr: |
+          (
+            (1 - (
+              sum(rate(up{job=~"blackbox-.*"}[24h]))
+              /
+              count(up{job=~"blackbox-.*"})
+            )) * 100 > (100 - 99.9) * 6
+          )
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: threshold
+          condition_id: probe_availability_slo_burn
+          notify_profile: web_availability
+        annotations:
+          summary: "采集可用率 SLO 24h 燃烧率 {{ printf \"%.2f\" $value }}x > 6x"
+          current_value: "{{ printf \"%.2f\" $value }}x"
+          threshold: "6x 24h 窗口"
+          impact: "预算以中等速率消耗。"
+          action: "排期排查潜在问题。"
+          description: "24 小时窗口 SLO 燃烧率 > 6（Google SRE 5% 预算慢燃）。"
+
+      # ----- 数据送达 SLO（目标 99.9%） -----
+      - alert: DataDeliverySLOBurnFast
+        expr: |
+          (
+            1 - (
+              sum(rate(prometheus_remote_write_samples_total[1h]))
+              /
+              (sum(rate(prometheus_remote_write_samples_total[1h])) + sum(rate(prometheus_remote_write_failed_samples_total[1h])))
+            )
+          ) * 100 < 100 - (100 - 99.9) * 14.4
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: remote_write
+          alert_type: threshold
+          condition_id: data_delivery_slo_burn
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "数据送达 SLO 1h 送达率 {{ printf \"%.2f\" $value }}%"
+          current_value: "{{ printf \"%.2f\" $value }}%"
+          threshold: "99.9% - 14.4x burn"
+          impact: "数据即将耗尽月度预算。"
+          action: "检查 vmauth/VM/网络。"
+          description: "1h 数据送达率低于 SLO-14.4x 等价阈值。"
+
+      - alert: DataDeliverySLOBurnSlow
+        expr: |
+          (
+            1 - (
+              sum(rate(prometheus_remote_write_samples_total[24h]))
+              /
+              (sum(rate(prometheus_remote_write_samples_total[24h])) + sum(rate(prometheus_remote_write_failed_samples_total[24h])))
+            )
+          ) * 100 < 100 - (100 - 99.9) * 6
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: remote_write
+          alert_type: threshold
+          condition_id: data_delivery_slo_burn
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "数据送达 SLO 24h 送达率 {{ printf \"%.2f\" $value }}%"
+          current_value: "{{ printf \"%.2f\" $value }}%"
+          threshold: "99.9% - 6x burn"
+          impact: "慢燃预算消耗。"
+          action: "排期排查远端写入。"
+          description: "24h 数据送达率低于 SLO-6x 等价阈值。"
+
+  # ===========================================================================
+  # 3. 数据平面健康（缺失/迟到/孤岛）
+  # ===========================================================================
+  - name: data-plane-health-alerts
+    interval: 2m
+    rules:
+      - alert: TargetAbsentOverThreshold
+        expr: count(up{job!~"prometheus|alertmanager"} == 0) > 5
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: target_absent
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "采集目标缺失 {{ printf \"%.0f\" $value }} 个（5m 持续）"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "> 5"
+          impact: "监控盲区扩大。"
+          action: "按 job 维度聚合下钻；排查 file_sd 与抓取。"
+          description: "5 分钟内 up==0 目标超过 5 个（排除 prometheus/alertmanager）。"
+
+      - alert: JobScrapeEntirelyDown
+        expr: (count by (job) (up == 0)) / (count by (job) (up)) == 1
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: job_entirely_down
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "job={{ $labels.job }} 全量目标不可达 5 分钟"
+          current_value: "100% down"
+          threshold: "ratio == 1 持续 ≥ 5m"
+          impact: "该 job 全量数据缺失。"
+          action: "检查 exporter 与 file_sd。"
+          description: "5 分钟内该 job 全部目标 up==0。"
+
+      - alert: SiteDataIsland
+        expr: |
+          (
+            (count by (site) (up{job="node_exporter"} > 0))
+            /
+            (count by (site) (up{job="node_exporter"}))
+          ) < 0.5
+          and (count by (site) (up{job="node_exporter"})) > 0
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: site_data_island
+          notify_profile: availability
+        annotations:
+          summary: "site={{ $labels.site }} 可用主机比例 {{ printf \"%.2f\" $value }} < 0.5"
+          current_value: "{{ printf \"%.2f\" $value }}"
+          threshold: "0.5"
+          impact: "该 site 大面积不可达，疑似孤岛。"
+          action: "协同机房/网络；触发 DR 评估。"
+          description: "5 分钟内单 site 主机可用率 < 50%。"
+
+  # ===========================================================================
+  # 4. 中心组件自监控（VM / vmalert / vmauth / Grafana）
+  # ===========================================================================
+  - name: center-component-alerts
+    interval: 1m
+    rules:
+      - alert: VictoriaMetricsDown
+        expr: up{job=~"victoriametrics.*", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: vm_down
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "VictoriaMetrics {{ $labels.instance }} 不可达 3 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "中心存储失效；remote_write 将失败。"
+          action: "检查 VM 服务与磁盘。"
+          description: "VM 抓取失败 3 分钟。"
+
+      - alert: VmStorageHigh
+        expr: 100 - (vm_free_disk_space_bytes / vm_total_disk_space_bytes) * 100 > 85
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: capacity
+          alert_type: capacity
+          condition_id: vm_storage_high
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "VM {{ $labels.instance }} 存储使用 {{ printf \"%.1f\" $value }}% > 85%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "85%"
+          impact: "数据写入即将失败。"
+          action: "扩容或清理旧数据（retention）。"
+          description: "VM 数据目录磁盘使用率 30 分钟超过 85%。"
+
+      - alert: VmStorageCritical
+        expr: 100 - (vm_free_disk_space_bytes / vm_total_disk_space_bytes) * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: capacity
+          alert_type: capacity
+          condition_id: vm_storage_high
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "VM {{ $labels.instance }} 存储 {{ printf \"%.1f\" $value }}% > 95%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "写入已受限。"
+          action: "紧急扩容。"
+          description: "VM 数据目录磁盘使用 5 分钟超过 95%。"
+
+      - alert: VmalertDown
+        expr: up{job="vmalert", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: vmalert_down
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "vmalert {{ $labels.instance }} 不可达 3 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "中心层 SLO 告警失效。"
+          action: "检查 vmalert 服务与 datasource 配置。"
+          description: "vmalert 抓取失败 3 分钟。"
+
+      - alert: VmalertRuleEvaluationFailures
+        expr: increase(vmalert_rules_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: rules
+          alert_type: threshold
+          condition_id: vmalert_rule_eval_fail
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "vmalert {{ $labels.instance }} 规则评估失败 {{ printf \"%.0f\" $value }} 次/10m"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "> 0/10m"
+          impact: "中心层规则部分失效。"
+          action: "查看 vmalert 日志，修复规则表达式。"
+          description: "10 分钟内 vmalert 规则评估失败次数增加。"
+
+      - alert: VmauthAuthFailing
+        expr: rate(vmauth_user_requests_total{status="error"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: security
+          alert_type: threshold
+          condition_id: vmauth_auth_failing
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "vmauth {{ $labels.instance }} 鉴权失败 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "1/s"
+          impact: "remote_write 鉴权失败频发。"
+          action: "检查凭据轮换；可能有未同步的客户端。"
+          description: "vmauth 鉴权失败速率 5 分钟超过 1/s。"
+
+      - alert: GrafanaDown
+        expr: up{job="grafana", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: grafana_down
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "Grafana {{ $labels.instance }} 不可达 3 分钟"
+          current_value: "up=0"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "可视化门户不可用。"
+          action: "检查 Grafana 服务与 datasource。"
+          description: "Grafana 抓取失败 3 分钟。"
+
+      - alert: CenterAlertDeliveryLag
+        expr: time() - vmalert_last_evaluation_timestamp_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: vmalert_delivery_lag
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "vmalert {{ $labels.instance }} 评估延迟 {{ printf \"%.0f\" $value }}s"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "600s"
+          impact: "中心层 SLO 告警可能迟到。"
+          action: "检查 vmalert/datasource 性能。"
+          description: "vmalert 距上次评估超过 10 分钟。"

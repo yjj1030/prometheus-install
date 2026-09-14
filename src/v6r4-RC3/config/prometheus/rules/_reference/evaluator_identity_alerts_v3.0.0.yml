@@ -1,0 +1,111 @@
+# ==============================================================================
+# evaluator_identity_alerts_v3.0.0.yml
+#
+# 审核 P1-18: 评估器身份不覆盖业务站点
+#
+# 关键问题：vmalert 通过 -external.label=evaluation_source=vmalert-${PORT} 标识自身
+# 如果这些标签不加保护地与业务 site / origin_prometheus 标签 join，会产生以下问题：
+#   - center 端 evaluation_source 被错误地当成 origin_prometheus
+#   - 中心端聚合告警可能按 vmalert 实例数重复告警（一个 condition 触发 N 次）
+#   - 业务 site 维度丢失，无法下钻
+#
+# 解决方案：
+#   1. vmalert 启动时使用保留前缀 `evaluator_*` 的 external label（v3.0.0-rc4-G0）
+#   2. 在 Alertmanager route 中将 evaluation_source 单独维度处理
+#   3. 业务告警 expr 必须保留 site / origin_prometheus（强制约束）
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 强制业务 site 标签存在（缺失即告警）
+  # ===========================================================================
+  - name: business-labels-required-alerts
+    interval: 5m
+    rules:
+      # 检查所有 firing 告警是否带 site 标签（通过 alertmanager 反向验证）
+      # 占位：实际验证在 alertmanager 端通过 route require_label
+      # 此处仅记录缺失率（用于历史趋势）
+      - record: monitoring:alert_without_site:count
+        expr: |
+          sum(
+            increase(
+              alertmanager_alerts_received_total{
+                alert_policy!="stress",
+                alertname!~"Watchdog.*|SiteUnreachable|ScrapeFailed|TargetGone"
+              }[1h]
+            ) unless on() (sum(
+              increase(
+                alertmanager_alerts_received_total{
+                  alert_policy!="stress",
+                  site!=""
+                }[1h]
+              )
+            ) > 0)
+          )
+
+      # 占位记录：评估器来源统计
+      - record: monitoring:evaluator_source:by_alertname
+        expr: |
+          count by (evaluation_source, alertname) (
+            alertmanager_alerts_received_total{
+              alert_policy!="stress",
+              evaluation_source=~"vmalert-.*"
+            }
+          )
+
+  # ===========================================================================
+  # 2. 抑制链路（vmalert 评估结果不被重复计入 edge Prometheus）
+  # ===========================================================================
+  # 关键约束：
+  #   - 中心端 vmalert 评估的告警必须有 evaluation_source=vmalert-* 标签
+  #   - 业务侧 site / origin_prometheus 必须保留
+  #   - Alertmanager route 对 evaluation_source=vmalert-* 的告警单独路由到中心通知组
+  #
+  # alertmanager.yml 片段：
+  #   routes:
+  #     - matchers:
+  #         - evaluation_source=~"vmalert-.*"
+  #       receiver: 'center-notifications'
+  #       group_by: ['alertname', 'site', 'cluster']
+
+  - name: evaluator-source-validation-alerts
+    interval: 10m
+    rules:
+      # 检测 vmalert 是否误把 site 标签清空（v3.0.0-rc5 自监控）
+      - alert: VMAlertSiteLost
+        expr: |
+          (
+            count(
+              alertmanager_alerts_received_total{
+                evaluation_source=~"vmalert-.*",
+                alert_policy!="stress"
+              }
+            )
+            -
+            count(
+              alertmanager_alerts_received_total{
+                evaluation_source=~"vmalert-.*",
+                alert_policy!="stress",
+                site!=""
+              }
+            )
+          )
+          > 0
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: vmalert_site_lost
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "vmalert 评估结果中 site 标签丢失"
+          current_value: "{{ printf \"%.0f\" $value }} 条"
+          threshold: "> 0 持续 ≥ 30m"
+          impact: "中心端聚合告警失去业务 site 维度，无法下钻。"
+          action: "检查 vmalert datasource / remote_write 标签保留配置。"
+          description: "vmalert 评估的告警中部分丢失 site 标签；违反 P1-18 约束。"
+
+# PLACEHOLDER evaluator-identity: enabled=false

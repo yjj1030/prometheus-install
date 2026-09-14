@@ -1,0 +1,19 @@
+# ==============================================================================
+# grafana/provisioning/dashboards/cluster.yml
+#
+# 审核 P1-20: Grafana provisioning 自动加载 dashboards
+# 由 grafana_installer_v1.0.0.sh install 时复制到 /etc/grafana/provisioning/dashboards/
+# ==============================================================================
+apiVersion: 1
+
+providers:
+  - name: 'prometheus-v3-cluster'
+    orgId: 1
+    folder: 'Prometheus'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

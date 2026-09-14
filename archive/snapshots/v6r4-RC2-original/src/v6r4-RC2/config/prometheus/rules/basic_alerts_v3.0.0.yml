@@ -1,0 +1,266 @@
+# ==============================================================================
+# basic_alerts_v3.0.0.yml
+#
+# Prometheus / Alertmanager 自监控告警
+# 覆盖维度: config / rules / alerting / remote_write / tsdb / query / monitoring
+#
+# 适配 AM 0.34（02 §6.6）：
+#   alertmanager_notifications_failed_total 的 reason 标签
+#     0.34 将 401/403 归为 authError，429 归为 rateLimited（原 clientError）
+#
+# 标签契约：六标签 + 六元组 annotations + alert_policy 联动
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 配置与规则健康
+  # ===========================================================================
+  - name: self-monitoring-config-rules
+    interval: 1m
+    rules:
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful != 1
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: config
+          alert_type: state
+          condition_id: prometheus_config_reload
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "Prometheus {{ $labels.instance }} 配置重载失败"
+          current_value: "last_reload_successful={{ printf \"%v\" $value }}"
+          threshold: "!= 1 持续 ≥ 5m"
+          impact: "配置变更未生效；新规则/目标可能未被加载。"
+          action: "promtool check 配置；journalctl -u prometheus 查看错误。"
+          description: "配置 reload 已失败 5 分钟，运行时仍用旧配置。"
+
+      - alert: PrometheusRuleEvaluationFailures
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: rules
+          alert_type: threshold
+          condition_id: prometheus_rule_eval_fail
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 规则评估失败 {{ printf \"%.0f\" $value }} 次/10m"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "> 0/10m"
+          impact: "部分规则未产生预期结果。"
+          action: "检查规则表达式与数据源；/api/v1/rules 看 lastEvaluation。"
+          description: "10 分钟内规则评估失败次数增加。"
+
+      - alert: PrometheusTSDBCorruption
+        expr: prometheus_tsdb_compactions_failed_total > 0
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: tsdb
+          alert_type: state
+          condition_id: prometheus_tsdb_corruption
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "Prometheus {{ $labels.instance }} TSDB 出现错误"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "> 0"
+          impact: "存储健康受损。"
+          action: "检查磁盘与 WAL；备份。"
+          description: "TSDB 出现 compaction 失败或重放错误。"
+
+  # ===========================================================================
+  # 2. Alertmanager 链路
+  # ===========================================================================
+  - name: self-monitoring-alerting
+    interval: 1m
+    rules:
+      - alert: PrometheusNotConnectedToAlertmanager
+        expr: prometheus_notifications_alertmanagers_discovered < 1
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: prometheus_am_disconnected
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 已 10 分钟无 AM 连接"
+          current_value: "discovered={{ printf \"%.0f\" $value }}"
+          threshold: "< 1 持续 ≥ 10m"
+          impact: "告警无法送达，体系断链。"
+          action: "检查 AM 服务与 --web.config.file 凭据；telnet/curl 验通。"
+          description: "Prometheus 在 10 分钟内未发现任何 Alertmanager 实例。"
+
+      - alert: AlertmanagerNotificationsFailing
+        expr: increase(alertmanager_notifications_failed_total{reason=~"authError|rateLimited|clientError"}[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: alerting
+          alert_type: threshold
+          condition_id: am_notification_failing
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "AM {{ $labels.instance }} 通知失败 reason={{ $labels.reason }}"
+          current_value: "{{ printf \"%.0f\" $value }} 次/15m"
+          threshold: "> 0/15m（reason 含 authError/rateLimited/clientError）"
+          impact: "通知送达受影响。"
+          action: "检查 webhook 中转服务状态；凭据（AM 0.34 reason 变化）。"
+          description: "15 分钟内通知失败计数增加（AM 0.34 新 reason 分类）。"
+
+      - alert: AlertmanagerConfigInvalid
+        expr: alertmanager_config_last_reload_successful != 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: config
+          alert_type: state
+          condition_id: am_config_reload
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "AM {{ $labels.instance }} 配置 reload 失败"
+          current_value: "{{ printf \"%v\" $value }}"
+          threshold: "!= 1 持续 ≥ 10m"
+          impact: "路由变更未生效。"
+          action: "amtool check-config 校验；journalctl -u alertmanager。"
+          description: "Alertmanager 配置 reload 失败。"
+
+  # ===========================================================================
+  # 3. remote_write 链路（02 §3.2.1：锁 v1.0 协议）
+  # ===========================================================================
+  - name: self-monitoring-remote-write
+    interval: 30s
+    rules:
+      - alert: PrometheusRemoteWriteFailing
+        expr: (rate(prometheus_remote_write_failed_samples_total[5m]) / rate(prometheus_remote_write_samples_total[5m])) > 0.01
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: remote_write
+          alert_type: threshold
+          condition_id: prometheus_remote_write_failing
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} remote_write 失败率 {{ printf \"%.2f\" $value }}% > 1%"
+          current_value: "{{ printf \"%.4f\" $value }}"
+          threshold: "0.01"
+          impact: "中心存储数据缺失。"
+          action: "检查 vmauth/VM 状态；队列与背压；凭据。"
+          description: "remote_write 样本失败率超过 1%。"
+
+      - alert: PrometheusRemoteWriteBehind
+        expr: (time() - prometheus_remote_write_last_success_timestamp_seconds) > 300
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: remote_write
+          alert_type: threshold
+          condition_id: prometheus_remote_write_behind
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} remote_write 已 {{ printf \"%.0f\" $value }}s 未成功"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "300s"
+          impact: "中心数据积压或链路中断。"
+          action: "检查 VM 与 vmauth 状态；网络连通性。"
+          description: "remote_write 距上次成功超过 5 分钟。"
+
+      - alert: PrometheusRemoteWriteShardsAtLimit
+        expr: prometheus_remote_write_shards > 0 and prometheus_remote_write_shard_capacity == 0
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: remote_write
+          alert_type: state
+          condition_id: prometheus_rw_shards_full
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} remote_write 队列已达上限"
+          current_value: "shard_capacity=0"
+          threshold: "≥ 15m 持续满载"
+          impact: "新数据将被丢弃。"
+          action: "调大 queue_config.max_shards/capacity；或排查 VM 端。"
+          description: "remote_write 队列满载 15 分钟。"
+
+  # ===========================================================================
+  # 4. 抓取健康
+  # ===========================================================================
+  - name: self-monitoring-scrape
+    interval: 1m
+    rules:
+      - alert: PrometheusTargetScrapePoolDropped
+        expr: increase(prometheus_target_scrapes_exceeded_body_size_limit_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: config
+          alert_type: threshold
+          condition_id: prom_target_body_limit
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 抓取体超限被丢"
+          current_value: "{{ printf \"%.0f\" $value }} 次/10m"
+          threshold: "> 0/10m"
+          impact: "部分目标数据丢失。"
+          action: "排查目标 exporter 异常输出；调 sample_limit/body_size_limit。"
+          description: "10 分钟内抓取体超限次数增加。"
+
+  # ===========================================================================
+  # 5. 体系自证（03 §3.4 三条 SLO，自监控侧）
+  # ===========================================================================
+  - name: self-monitoring-slo
+    interval: 1m
+    rules:
+      - alert: ProbeAvailabilitySLOBreach
+        expr: |
+          (sum by (job) (up{job=~"blackbox-.*"}) / count by (job) (up{job=~"blackbox-.*"})) * 100 < 95
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: availability
+          alert_type: threshold
+          condition_id: probe_availability_slo
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "blackbox job={{ $labels.job }} 可用率 {{ printf \"%.1f\" $value }}% < 95% (30m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "95%"
+          impact: "采集可用率低于内部 SLO（03 §3.4）。"
+          action: "排查 blackbox_exporter 与探测目标连通性。"
+          description: "blackbox 采集可用率（采集可用率 SLO）30 分钟低于 95%。"
+
+      - alert: DataDeliverySLOBreach
+        expr: |
+          (1 - (
+            sum by (instance) (rate(prometheus_remote_write_failed_samples_total[30m]))
+            /
+            sum by (instance) (rate(prometheus_remote_write_samples_total[30m]))
+          )) * 100 < 99.9
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: remote_write
+          alert_type: threshold
+          condition_id: data_delivery_slo
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 数据送达率 {{ printf \"%.2f\" $value }}% < 99.9%"
+          current_value: "{{ printf \"%.2f\" $value }}%"
+          threshold: "99.9%"
+          impact: "数据到达率 SLO 受影响。"
+          action: "检查 vmauth/VM 端队列。"
+          description: "30 分钟数据送达率低于内部 SLO。"

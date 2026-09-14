@@ -1,0 +1,213 @@
+# ==============================================================================
+# self_monitoring_audit_v3.0.0.yml
+#
+# 审核 P1-19: 自监控规则追溯真实指标
+#
+# 所有 self-monitoring 告警必须基于以下官方真实指标（不可使用自定义/合成指标）：
+#
+#   Prometheus 自监控指标（prometheus_target_* / prometheus_*）：
+#     - prometheus_target_scrapes_exceeded_body_size_limit_total  抓取体超限计数
+#     - prometheus_tsdb_head_series                              当前活跃 series 数
+#     - prometheus_tsdb_compactions_failed_total                 压缩失败计数
+#     - prometheus_target_scrape_pool_targets                    target 池大小
+#     - prometheus_remote_write_*_total                          远端写入统计
+#     - prometheus_remote_write_shards / shard_capacity          shard 状态
+#     - prometheus_config_last_reload_success_timestamp_seconds  配置重载时间
+#
+#   Alertmanager 自监控指标（alertmanager_*）：
+#     - alertmanager_alerts_received_total                       接收告警计数
+#     - alertmanager_alerts_processed_total                      处理告警计数
+#     - alertmanager_notifications_failed_total                  通知失败计数
+#     - alertmanager_notification_latency_seconds_*              通知延迟
+#     - alertmanager_cluster_*                                   集群状态
+#
+#   vmalert 自监控指标：
+#     - vmalert_alerts_send_failed_total                         vmalert 发 AM 失败
+#     - vmalert_alerts_sent_total                                vmalert 发 AM 成功
+#     - vmalert_rules_last_evaluation_timestamp_seconds          规则评估时间
+#     - vmalert_datasource_*                                     datasource 健康
+#
+#   blackbox_exporter 自监控指标（probe_*）：
+#     - probe_success                                            探测成功（0/1）
+#     - probe_duration_seconds                                   探测耗时
+#     - probe_http_status_code                                   HTTP 响应码
+#     - probe_ssl_earliest_cert_expiry                           证书过期时间
+#
+# PLACEHOLDER self-monitoring-audit: enabled=false
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. Prometheus 自身健康（基于 prometheus_* 真实指标）
+  # ===========================================================================
+  - name: prometheus-self-monitoring-validated
+    interval: 1m
+    rules:
+      # config 重载失败（基于真实指标 prometheus_config_last_reload_success_timestamp_seconds）
+      - alert: PrometheusConfigReloadFailed
+        expr: |
+          (
+            time() - prometheus_config_last_reload_success_timestamp_seconds
+          ) > 3600
+          and
+          (
+            changes(prometheus_config_last_reload_success_timestamp_seconds[1h]) == 0
+          )
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: config
+          alert_type: state
+          condition_id: prom_config_reload_failed
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} config 重载失败 1 小时"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "> 3600s 无成功重载"
+          impact: "配置变更未生效；可能语法错误或权限问题。"
+          action: "promtool check config /usr/local/prometheus/prometheus-<port>/etc/prometheus.yml；查看对应 systemd 日志。"
+          description: "基于 prometheus_config_last_reload_success_timestamp_seconds；1 小时内无任何 reload 成功。"
+
+      # TSDB 压缩失败（基于真实指标 prometheus_tsdb_compactions_failed_total）
+      - alert: PrometheusTSDBCompactionsFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[1h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: tsdb
+          alert_type: state
+          condition_id: prom_tsdb_compaction_failed
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} TSDB 1 小时压缩失败 ≥ 1 次"
+          current_value: "{{ printf \"%.0f\" $value }} 次"
+          threshold: "> 0/1h"
+          impact: "长期数据压缩受影响；存储可能膨胀。"
+          action: "检查磁盘空间；查看 WAL 状态；考虑重启。"
+          description: "基于 prometheus_tsdb_compactions_failed_total；1 小时内出现压缩失败。"
+
+      # target pool 规模异常（基于真实指标）
+      - alert: PrometheusTargetPoolDrift
+        expr: |
+          (
+            abs(
+              prometheus_target_scrape_pool_targets
+              - prometheus_target_scrape_pool_targets offset 1h
+            ) / clamp_min(prometheus_target_scrape_pool_targets, 1)
+          ) > 0.3
+        for: 30m
+        labels:
+          severity: info
+          asset_type: monitoring
+          category: config
+          alert_type: state
+          condition_id: prom_target_pool_drift
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} target pool 1h 变化率 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "> 30%"
+          impact: "可能有大量新增/下线；file_sd 抖动。"
+          action: "回顾最近的 file_sd 配置变更。"
+          description: "基于 prometheus_target_scrape_pool_targets；与 1h 前对比变化率。"
+
+  # ===========================================================================
+  # 2. Alertmanager 自身健康（基于 alertmanager_* 真实指标）
+  # ===========================================================================
+  - name: alertmanager-self-monitoring-validated
+    interval: 1m
+    rules:
+      # 通知失败率（基于真实指标 alertmanager_notifications_failed_total）
+      - alert: AlertmanagerNotificationFailureRate
+        expr: |
+          (
+            rate(alertmanager_notifications_failed_total[10m])
+            /
+            clamp_min(
+              rate(alertmanager_notifications_total[10m]),
+              0.01
+            )
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: alerting
+          alert_type: threshold
+          condition_id: am_notify_failure_rate
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 通知失败率 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "10%"
+          impact: "10% 告警未送达。"
+          action: "查看 alertmanager 日志；定位失败 receiver。"
+          description: "基于 alertmanager_notifications_failed_total；10m 失败率持续 10m 超 10%。"
+
+  # ===========================================================================
+  # 3. vmalert 自身健康（基于 vmalert_* 真实指标）
+  # ===========================================================================
+  - name: vmalert-self-monitoring-validated
+    interval: 1m
+    rules:
+      # vmalert 发送告警失败（基于 vmalert_alerts_send_failed_total）
+      - alert: VMAlertSendFailed
+        expr: increase(vmalert_alerts_send_failed_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: vmalert_send_failed
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} vmalert 10m 内发送失败 ≥ 1 次"
+          current_value: "{{ printf \"%.0f\" $value }} 次"
+          threshold: "> 0/10m"
+          impact: "中心端评估的告警未送达 Alertmanager。"
+          action: "检查 notifier URL / 凭据；查看 vmalert 日志。"
+          description: "基于 vmalert_alerts_send_failed_total；vmalert 发 AM 失败计数增加。"
+
+      # vmalert 规则评估停滞（基于 vmalert_rules_last_evaluation_timestamp_seconds）
+      - alert: VMAlertEvaluationStalled
+        expr: |
+          (
+            time() - vmalert_rules_last_evaluation_timestamp_seconds
+          ) > 600
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: monitoring
+          category: alerting
+          alert_type: state
+          condition_id: vmalert_eval_stalled
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} vmalert 评估停滞 10 分钟"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "距离上次评估 > 600s"
+          impact: "中心端所有告警/记录规则未更新。"
+          action: "检查 vmalert 进程；查看 datasource 连接。"
+          description: "基于 vmalert_rules_last_evaluation_timestamp_seconds；评估时间戳未更新超过 10 分钟。"
+
+# PLACEHOLDER self-monitoring-audit: enabled=false
+
+# ==============================================================================
+# 真实指标溯源表（审核 P1-19 验收清单）
+# ==============================================================================
+#
+# | Alert 名称                          | 真实指标                                              | 替代（不允许）
+# |-------------------------------------|------------------------------------------------------|----------------------------------------
+# | PrometheusConfigReloadFailed        | prometheus_config_last_reload_success_timestamp_seconds | 不能用 up==0 推断
+# | PrometheusTSDBCompactionsFailing    | prometheus_tsdb_compactions_failed_total             | 不能用推导
+# | PrometheusTargetPoolDrift           | prometheus_target_scrape_pool_targets                | 不能用 count(up)
+# | AlertmanagerNotificationFailureRate | alertmanager_notifications_failed_total               | 不能用 absent(alertmanager_*)
+# | VMAlertSendFailed                   | vmalert_alerts_send_failed_total                     | 不能用 vmalert_alerts_sent_total==0
+# | VMAlertEvaluationStalled            | vmalert_rules_last_evaluation_timestamp_seconds      | 不能用 vmalert_up
+# | ScrapeFailed                        | up{job=...} == 0 + changes                            | 不能用 absent
+# | TargetGone                          | up{job=...} == 0 + absent                            | 不能用 changes
+# | SiteUnreachable                     | count by(site)(up==0) >= 3                           | 不能用 sum(up==0)

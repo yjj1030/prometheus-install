@@ -1,0 +1,16 @@
+name: Public repository sanitization
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan tracked files and release archives
+        run: bash tools/check_public_sanitization.sh

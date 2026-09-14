@@ -1,0 +1,104 @@
+# ==============================================================================
+# tls_alerts_v3.0.0.yml
+#
+# 审核 P1-13: TLS 与证书按实际指标语义（拆分语义维度）
+# 此文件**不**在主加载范围；内容已与 blackbox_alerts_v3.0.0.yml 合并，
+# 在下一个版本会被 inline 进 blackbox_alerts。
+# 保留此文件用于：
+#   1. 知识沉淀（指标语义对照表）
+#   2. 复杂场景参考（多 SNI、多链证书）
+# ==============================================================================
+#
+# 指标语义对照（blackbox_exporter 0.25.0）：
+#   - probe_ssl_earliest_cert_expiry    Unix timestamp；==0 表示探针未拿到证书
+#   - probe_tls_version_info            TLS 版本数值（0x0303 = TLS 1.2）
+#   - probe_failed_due_to_regex         早期版本存在；0.25 已弃用
+#   - probe_http_status_code            HTTP 响应码（成功 2xx）
+#
+# 拆分为五种语义独立的告警：
+#   1. SSLCertExpiringSoon*           证书过期倒计时（已有；blackbox_alerts 内）
+#   2. SSLCertInvalid                 证书链无效 / 未拿到证书（已有）
+#   3. SSLCertExpiredAlready          证书已过期（probe_ssl_earliest_cert_expiry < time()）
+#   4. TLSVersionBelow12              版本过低（已有）
+#   5. TLSHandshakeFailed             握手失败（probe_success=0 且非 HTTP 状态码）
+#   6. TLSChainUntrusted              证书链不受信（单独探针配置）
+# ==============================================================================
+#
+# groups:
+#
+#   # ---------------------------------------------------------------------------
+#   # 6. TLS 握手失败 vs HTTP 失败（区分语义）
+#   # ---------------------------------------------------------------------------
+#   - name: tls-handshake-alerts
+#     interval: 5m
+#     rules:
+#       - alert: TLSHandshakeFailed
+#         expr: probe_failed_due_to_regex{alert_policy!="stress"} == 1
+#               or (probe_success{alert_policy!="stress"} == 0 and probe_http_status_code{alert_policy!="stress"} == 0)
+#         for: 5m
+#         labels:
+#           severity: critical
+#           asset_type: web
+#           category: security
+#           alert_type: state
+#           condition_id: tls_handshake_failed
+#           notify_profile: security_cert
+#         annotations:
+#           summary: "TLS 握手失败 {{ $labels.instance }}"
+#           current_value: "0"
+#           threshold: "探针无法完成 TLS 握手 持续 ≥ 5m"
+#           impact: "HTTPS 不可用；客户端报 ERR_SSL_* 错误。"
+#           action: "检查证书/协议/密码套件；用 openssl s_client -connect 复现。"
+#           description: "黑盒探针在 5 分钟内多次无法完成 TLS 握手；区别于 HTTP 状态码失败。"
+#
+#       - alert: SSLCertExpiredAlready
+#         expr: probe_ssl_earliest_cert_expiry{alert_policy!="stress"} > 0
+#               and probe_ssl_earliest_cert_expiry{alert_policy!="stress"} < time()
+#         for: 5m
+#         labels:
+#           severity: emergency
+#           asset_type: web
+#           category: security
+#           alert_type: state
+#           condition_id: ssl_expired
+#           notify_profile: security_cert
+#         annotations:
+#           summary: "SSL {{ $labels.instance }} 证书已过期"
+#           current_value: "{{ printf \"%.0f\" $value }}"
+#           threshold: "earliest_cert_expiry < time() 持续 ≥ 5m"
+#           impact: "浏览器立即拦截，业务完全中断。"
+#           action: "紧急更换证书；启用备用 CDN/备份服务。"
+#           description: "证书过期时间早于当前时间，业务已中断。"
+#
+#       - alert: TLSChainUntrusted
+#         # 需要在 blackbox 配置中添加 probe_http_ssl_verify_chain：失败时单独 emit
+#         # 占位：未来 blackbox 配置支持 chain_trusted 后启用
+#         expr: probe_ssl_chain_trusted{alert_policy!="stress"} == 0
+#         for: 10m
+#         labels:
+#           severity: warning
+#           asset_type: web
+#           category: security
+#           alert_type: state
+#           condition_id: tls_chain_untrusted
+#           notify_profile: security_cert
+#         annotations:
+#           summary: "TLS 证书链不受信 {{ $labels.instance }}"
+#           current_value: "0"
+#           threshold: "chain_trusted == 0 持续 ≥ 10m"
+#           impact: "客户端可能出现证书警告。"
+#           action: "补全中间证书；检查服务端配置。"
+#           description: "证书链中至少一个证书不受信任。"
+# PLACEHOLDER tls-alerts: enabled=false
+
+# ==============================================================================
+# 常见踩坑
+# ==============================================================================
+#
+#   - 表达式 (probe_ssl_earliest_cert_expiry - time()) 单位是秒
+#     转换为天：除以 86400；转换为小时：除以 3600
+#   - 不要使用 on(instance) group_left() 连接 probe_ssl_* 与 probe_http_*；
+#     这两个指标的 instance label 内容不同（probe_ssl 用 SNI，probe_http 用 IP:port）
+#   - TLS 1.3 (0x0304) 在 0.25.0 之前版本可能解析为 0x0303（旧库行为）
+#   - 当 cert 为 ECDSA 时，probe_tls_version_info 与 RSA 不一致；不影响 alert 触发
+#   - 跨午夜时区不影响证书过期时间（Unix timestamp 绝对值）

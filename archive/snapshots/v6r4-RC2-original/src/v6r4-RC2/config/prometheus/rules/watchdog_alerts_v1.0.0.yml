@@ -1,0 +1,36 @@
+# ==============================================================================
+# watchdog_alerts_v1.0.0.yml
+#
+# Watchdog 心跳告警：常 firing。
+# 通知链路工作正常 → 该告警处于 firing 并定期重发
+# 通知链路异常 → 该告警不出现 → 表明链路断
+#
+# 用法（01 §8.4 + 03 §3.2/§4.5）：
+#   - 必须单独配置一个不参与抑制的 receiver
+#   - repeat_interval 设较短值（建议 1h），便于及时发现断链
+#   - 由独立脚本通过 AM API 定期验证：收到 firing 视为正常，收到 resolved 即告警
+#
+# 不写 alert_type / 抑制；suppress 不适用
+# ==============================================================================
+
+groups:
+
+  - name: watchdog-heartbeat
+    interval: 1m
+    rules:
+      - alert: WatchdogPing
+        expr: vector(1)
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: monitoring
+          alert_type: event
+          condition_id: watchdog_ping
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "watchdog 心跳（链路自证）"
+          current_value: "1"
+          threshold: "永远"
+          impact: "本告警不 firing 时 = 通知链路异常，需立即排查 AM/中转/IM。"
+          action: "链路正常时静默关注；断链时按 04 §4.5 应急速查处理。"
+          description: "Watchdog 心跳告警：通知链路正常应持续 firing；若消失说明通知链路断了。"

@@ -1,0 +1,272 @@
+# ==============================================================================
+# blackbox_alerts_v3.0.0.yml
+#
+# Web (HTTP/HTTPS) / TCP / ICMP / DNS 探活 + SSL 证书告警
+# 由 blackbox_exporter 0.28.0 暴露的 probe_* 指标驱动
+#
+# 关键红线（02 §2.2）：
+#   - probe_timeout_seconds 在 0.28.0 不存在（master 才有），不得引用
+#   - 超时语义一律 probe_duration_seconds vs scrape_timeout
+#   - 纯 IPv4 环境 module 必须显式 preferred_ip_protocol: ip4
+#
+# 标签契约：同 node_alerts，六标签 + 六元组 annotations + alert_policy 联动
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. HTTP(S) 网站探活（state）
+  # ===========================================================================
+  - name: blackbox-web-availability
+    interval: 30s
+    rules:
+      - alert: WebSiteDownWarning
+        expr: probe_success{job=~"blackbox-http.*", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          asset_type: web
+          category: availability
+          alert_type: state
+          condition_id: web_down
+          notify_profile: web_availability
+        annotations:
+          summary: "Web {{ $labels.instance }} HTTP 探针失败 3 分钟"
+          current_value: "{{ printf \"success=%v\" $value }}"
+          threshold: "success == 0 持续 ≥ 3m"
+          impact: "用户访问异常。"
+          action: "curl -v 排查；检查 DNS/证书/应用状态。"
+          description: "HTTP 探针 3 分钟内未拿到任何状态码（timeout/DNS/conn refused）。"
+
+      - alert: WebSiteDownCritical
+        expr: probe_success{job=~"blackbox-http.*", alert_policy!="stress"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: web
+          category: availability
+          alert_type: state
+          condition_id: web_down
+          notify_profile: web_availability
+        annotations:
+          summary: "Web {{ $labels.instance }} HTTP 探针失败 10 分钟"
+          current_value: "{{ printf \"success=%v\" $value }}"
+          threshold: "success == 0 持续 ≥ 10m"
+          impact: "用户无法访问。"
+          action: "切流/重启；检查后端/CDN/负载均衡。"
+          description: "HTTP 探针持续 10 分钟无可用响应。"
+
+      - alert: WebSiteDegraded5xx
+        expr: probe_http_status_code{job=~"blackbox-http.*", alert_policy!="stress"} >= 500
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: web
+          category: availability
+          alert_type: state
+          condition_id: web_5xx
+          notify_profile: web_availability
+        annotations:
+          summary: "Web {{ $labels.instance }} 返回 {{ printf \"%.0f\" $value }}"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "status ≥ 500 持续 ≥ 5m"
+          impact: "用户访问异常。"
+          action: "查看应用日志，关联发布/数据库/下游依赖。"
+          description: "5 分钟内持续返回 5xx 状态码。"
+
+      - alert: WebSiteSlowWarning
+        expr: probe_duration_seconds{job=~"blackbox-http.*", alert_policy!="stress"} > 1
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: web
+          category: performance
+          alert_type: threshold
+          condition_id: web_slow
+          notify_profile: web_availability
+        annotations:
+          summary: "Web {{ $labels.instance }} 响应 {{ printf \"%.2f\" $value }}s > 1s (10m)"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "1s"
+          impact: "用户体验下降。"
+          action: "结合应用监控排查慢 SQL/慢接口。"
+          description: "HTTP 探针耗时超过 1s 持续 10 分钟。"
+
+      - alert: WebSiteSlowCritical
+        expr: probe_duration_seconds{job=~"blackbox-http.*", alert_policy!="stress"} > 3
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: web
+          category: performance
+          alert_type: threshold
+          condition_id: web_slow
+          notify_profile: web_availability
+        annotations:
+          summary: "Web {{ $labels.instance }} 响应 {{ printf \"%.2f\" $value }}s > 3s (5m)"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "3s"
+          impact: "用户大量流失。"
+          action: "立即介入；排查 CDN/源站/数据库。"
+          description: "HTTP 探针耗时超过 3s 持续 5 分钟。"
+
+  # ===========================================================================
+  # 2. TCP / ICMP 探活
+  # ===========================================================================
+  - name: blackbox-tcp-alerts
+    interval: 30s
+    rules:
+      - alert: TcpEndpointDown
+        expr: probe_success{job=~"blackbox-tcp.*", alert_policy!="stress"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: tcp_endpoint_down
+          notify_profile: web_availability
+        annotations:
+          summary: "TCP 端点 {{ $labels.instance }} 不可达 5 分钟"
+          current_value: "{{ printf \"success=%v\" $value }}"
+          threshold: "success == 0 持续 ≥ 5m"
+          impact: "依赖该端口的服务异常。"
+          action: "telnet/nc 验证；检查服务监听与防火墙。"
+          description: "TCP 探针持续 5 分钟失败。"
+
+      - alert: IcmpHostUnreachable
+        expr: probe_success{job=~"blackbox-icmp.*", alert_policy!="stress"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: icmp_unreachable
+          notify_profile: network_quality
+        annotations:
+          summary: "ICMP 目标 {{ $labels.instance }} 不可达 5 分钟"
+          current_value: "{{ printf \"success=%v\" $value }}"
+          threshold: "success == 0 持续 ≥ 5m"
+          impact: "主机网络层不可达。"
+          action: "ping/路由追踪；排查防火墙/路由。"
+          description: "ICMP 探针持续 5 分钟失败。"
+
+  # ===========================================================================
+  # 3. SSL 证书（4 级不重叠：30d/14d/7d/48h）
+  # ===========================================================================
+  - name: ssl-cert-alerts
+    interval: 5m
+    rules:
+      - alert: SSLCertExpiringSoon30d
+        expr: (probe_ssl_earliest_cert_expiry{alert_policy!="stress"} - time()) / 86400 < 30
+        for: 30m
+        labels:
+          severity: info
+          asset_type: web
+          category: security
+          alert_type: capacity
+          condition_id: ssl_expiry
+          notify_profile: security_cert
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          current_value: "{{ printf \"%.1f\" $value }} 天"
+          threshold: "30 天"
+          impact: "未及时续签将导致业务不可用。"
+          action: "通知运维/业务方排期续签。"
+          description: "证书将在不足 30 天后到期。"
+
+      - alert: SSLCertExpiringSoon14d
+        expr: (probe_ssl_earliest_cert_expiry{alert_policy!="stress"} - time()) / 86400 < 14
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: web
+          category: security
+          alert_type: capacity
+          condition_id: ssl_expiry
+          notify_profile: security_cert
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          current_value: "{{ printf \"%.1f\" $value }} 天"
+          threshold: "14 天"
+          impact: "需立即协调续签。"
+          action: "工单升级，协调证书签发方。"
+          description: "证书将在不足 14 天后到期。"
+
+      - alert: SSLCertExpiringSoon7d
+        expr: (probe_ssl_earliest_cert_expiry{alert_policy!="stress"} - time()) / 86400 < 7
+        for: 30m
+        labels:
+          severity: critical
+          asset_type: web
+          category: security
+          alert_type: capacity
+          condition_id: ssl_expiry
+          notify_profile: security_cert
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          current_value: "{{ printf \"%.1f\" $value }} 天"
+          threshold: "7 天"
+          impact: "接近用户感知的中断窗口。"
+          action: "申请紧急续签；同时预热备用证书。"
+          description: "证书将在不足 7 天后到期。"
+
+      - alert: SSLCertExpiringEmergency
+        expr: (probe_ssl_earliest_cert_expiry{alert_policy!="stress"} - time()) / 3600 < 48
+        for: 30m
+        labels:
+          severity: emergency
+          asset_type: web
+          category: security
+          alert_type: capacity
+          condition_id: ssl_expiry
+          notify_profile: security_cert
+        annotations:
+          summary: "SSL {{ $labels.instance }} 48 小时内过期"
+          current_value: "{{ printf \"%.1f\" $value }} 小时"
+          threshold: "48 小时"
+          impact: "用户访问将失败。"
+          action: "立即更换证书，协调发布。"
+          description: "证书将在不足 48 小时后到期。"
+
+      - alert: SSLCertInvalid
+        expr: probe_ssl_earliest_cert_expiry{alert_policy!="stress"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: web
+          category: security
+          alert_type: state
+          condition_id: ssl_invalid
+          notify_profile: security_cert
+        annotations:
+          summary: "SSL {{ $labels.instance }} 证书链无效"
+          current_value: "expiry=0"
+          threshold: "expiry == 0 持续 ≥ 10m"
+          impact: "用户访问被浏览器拦截。"
+          action: "检查证书链，必要时补全中间证书。"
+          description: "黑盒探针未拿到有效证书过期时间。"
+
+  # ===========================================================================
+  # 4. TLS 版本与算法降级（安全性）
+  # ===========================================================================
+  - name: tls-version-alerts
+    interval: 5m
+    rules:
+      - alert: TLSVersionBelow12
+        expr: probe_tls_version_info{alert_policy!="stress"} < 0x0303
+        labels:
+          severity: warning
+          asset_type: web
+          category: security
+          alert_type: state
+          condition_id: tls_version_low
+          notify_profile: security_cert
+        annotations:
+          summary: "TLS 版本过低：{{ $labels.version }} ({{ printf \"0x%04x\" $value }})"
+          current_value: "{{ printf \"0x%04x\" $value }}"
+          threshold: "≥ TLS 1.2 (0x0303)"
+          impact: "存在已知漏洞风险。"
+          action: "服务端配置最低 TLS 1.2。"
+          description: "目标提供的 TLS 版本低于 1.2。"

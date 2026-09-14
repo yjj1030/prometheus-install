@@ -1,0 +1,359 @@
+# ==============================================================================
+# node_usage_record_rules_v3.0.0.yml
+#
+# 节点/主机/网络/磁盘 记录规则 v3.0.0（继承 v2.4.0 准则）
+#
+# 设计准则（01 01_TOP_DESIGN §4 + 02 02_COMPONENT_MATRIX §2.1-2.3 联合背书）：
+#   1. 命名格式 level:metric:operations[:canonical][:max|:percent][:rate1m|:rate5m]
+#      - 历史名 cpu:usage:rate1m / mem:usage:rate1m 必须保留兼容（已消费）
+#      - 新名 node:<resource>:<operations> 形式（与 Grafana 看板消费对齐）
+#   2. Grafana 契约清单 9 项必须存在，node_discovery v2.5.0 运行态校验：
+#      cpu:usage:rate1m / mem:usage:rate1m / node:cpu_usage:percent /
+#      node:memory_usage:percent / node:filesystem_usage:max /
+#      node:disk_io_utilization:max:rate5m / node:network_throughput:rate5m /
+#      node:tcp_retransmission:percent / node:resource_pressure:max
+#   3. 核心指标不依赖 node_uname_info（uname 异常时核心指标不得消失）
+#   4. 聚合用 `without` 而非 `by`：避免新增 target 标签后聚合键被稀释
+#   5. canonical 去重：同 instance+device 多挂载点用 topk by (...) 收敛单条
+#   6. 口径过滤前置：
+#      - 文件系统 fstype=~"ext[234]?|xfs|btrfs|zfs" 且排除 /boot /run /var/lib/(docker|containers|kubelet/pods)
+#      - 网卡 device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"
+#      - 磁盘 device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+|zram"
+#   7. 比率指标带下限保护（如 TCP 重传率 OutSegs>0；网络错包率 Packets>10）
+#   8. 评估周期：interval 1m（与抓取 30s 配合）
+#   9. 告警优先消费记录指标（v2 准则 2）
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 兼容层：保留历史记录指标名（不破坏 Grafana 既有看板）
+  # ===========================================================================
+  # 审核 §12.5 P0-05: CPU 改 without (cpu, mode)，不丢业务身份（alert_policy/job/asset_id）
+  - name: compat-rate1m
+    interval: 1m
+    rules:
+      - record: cpu:usage:rate1m
+        expr: 100 - (avg without (cpu, mode) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)
+
+      - record: mem:usage:rate1m
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+  # ===========================================================================
+  # CPU
+  # ===========================================================================
+  # 审核 §12.5 P0-05: CPU 改 without (cpu, mode)，不丢业务身份
+  - name: cpu-records
+    interval: 1m
+    rules:
+      - record: node:cpu_usage:percent
+        expr: 100 - (avg without (cpu, mode) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)
+
+      - record: node:load_per_core:rate1m
+        expr: node_load5 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"})
+
+      - record: node:cpu_cores:count
+        expr: count without (cpu, mode) (node_cpu_seconds_total{mode="idle"})
+
+  # ===========================================================================
+  # 内存
+  # ===========================================================================
+  - name: memory-records
+    interval: 1m
+    rules:
+      - record: node:memory_usage:percent
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+      - record: node:memory_MemAvailable_bytes:sum
+        expr: sum without (cpu, mode) (node_memory_MemAvailable_bytes)
+
+  # ===========================================================================
+  # 文件系统：canonical 去重 + 口径过滤
+  # ===========================================================================
+  # 审核 §12.5 P0-05: 明细 vs 汇总分开；保留 alert_policy/job 等业务标签
+  - name: filesystem-records
+    interval: 1m
+    rules:
+      # 明细层：每个文件系统一条记录（保留 mountpoint/device）
+      - record: node:filesystem_usage:percent
+        expr: |
+          100 * (1 - (
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}
+            /
+            node_filesystem_size_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}
+          ))
+
+      # 汇总层：主机最大值（不丢业务身份）
+      - record: node:filesystem_usage:max
+        expr: |
+          max without (mountpoint, device, fstype) (
+            node:filesystem_usage:percent
+          )
+
+      - record: node:filesystem_avail_bytes:min
+        expr: |
+          min without (mountpoint, device, fstype) (
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}
+          )
+
+      - record: node:filesystem_inode_free:percent
+        expr: |
+          node_filesystem_files_free{fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_files{fstype!~"tmpfs|overlay|squashfs"} * 100
+
+      # 审核 P1-03: 每文件系统稳定告警身份（按 mountpoint 聚合，剥离 device）
+      # 当主机重启 / 设备 UUID 变化 / /dev/sda→/dev/sdb 时，alert 序列不应断裂
+      # 仅保留 mountpoint + 业务标签（site / origin_prometheus / alert_policy）
+      - record: node:filesystem_usage:percent_canonical
+        expr: |
+          max by (instance, mountpoint, site, env, alert_policy, origin_prometheus, job) (
+            node:filesystem_usage:percent
+          )
+
+      - record: node:filesystem_avail_bytes:canonical_min
+        expr: |
+          min by (instance, mountpoint, site, env, alert_policy, origin_prometheus, job) (
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}
+          )
+
+      - record: node:filesystem_inode_free:percent_canonical
+        expr: |
+          min by (instance, mountpoint, site, env, alert_policy, origin_prometheus, job) (
+            node:filesystem_inode_free:percent
+          )
+
+  # ===========================================================================
+  # 磁盘 IO
+  # ===========================================================================
+  # 审核 §12.5 P0-05: 保留 alert_policy/job 等业务标签
+  - name: disk-io-records
+    interval: 1m
+    rules:
+      - record: node:disk_io_utilization:max:rate5m
+        expr: |
+          max without (device) (
+            rate(node_disk_io_time_seconds_total{device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+|zram"}[5m]) * 100
+          )
+
+      - record: node:disk_read_bytes:sum:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_disk_read_bytes_total{device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+|zram"}[5m])
+          )
+
+      - record: node:disk_written_bytes:sum:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_disk_written_bytes_total{device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+|zram"}[5m])
+          )
+
+      - record: node:filesystem_predicted_full_hours
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs"}[6h],
+            4 * 3600
+          ) < 0
+
+  # ===========================================================================
+  # 网络
+  # ===========================================================================
+  # 审核 §12.5 P0-05: 保留 alert_policy/job 等业务标签
+  - name: network-records
+    interval: 1m
+    rules:
+      - record: node:network_throughput:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+            +
+            rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          )
+
+      - record: node:network_receive_errs:rate5m
+        expr: |
+          rate(node_network_receive_errs_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      - record: node:network_transmit_errs:rate5m
+        expr: |
+          rate(node_network_transmit_errs_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      - record: node:network_drop:rate5m
+        expr: |
+          rate(node_network_receive_drop_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          +
+          rate(node_network_transmit_drop_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      # =========================================================================
+      # 审核 P1-04: 网卡方向语义（inbound / outbound 拆分，不再求和）
+      # 之前 node:network_throughput:rate5m 是双向求和，告警无法判断方向
+      # =========================================================================
+      - record: node:network_inbound_bytes:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          )
+
+      - record: node:network_outbound_bytes:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          )
+
+      - record: node:network_inbound_packets:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_network_receive_packets_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          )
+
+      - record: node:network_outbound_packets:rate5m
+        expr: |
+          sum without (device) (
+            rate(node_network_transmit_packets_total{device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+          )
+
+  # ===========================================================================
+  # 审核 P1-04: Swap 语义修正
+  # 之前 node:memory_usage:percent 仅算 RAM；Swap 使用率被忽略
+  # 真实语义：swap_used_bytes 反映系统内存压力，而非"是否配置了 swap"
+  # ===========================================================================
+  - name: swap-records
+    interval: 1m
+    rules:
+      # 当前 Swap 已用字节（KB → Byte）
+      - record: node:swap_used_bytes
+        expr: |
+          (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+        # 该算式不需要 group by；instance 已隐含在 metric name
+
+      # Swap 使用率（相对 SwapTotal）
+      - record: node:swap_usage:percent
+        expr: |
+          100 * (
+            (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+            /
+            clamp_min(node_memory_SwapTotal_bytes, 1)
+          )
+
+      # Swap 在最近 5 分钟的累计写入字节（反映 swap 抖动）
+      - record: node:swap_io_in_bytes:rate5m
+        expr: |
+          rate(node_vmstat_pswpin[5m]) * 4096
+
+      - record: node:swap_io_out_bytes:rate5m
+        expr: |
+          rate(node_vmstat_pswpout[5m]) * 4096
+
+  # ===========================================================================
+  # 审核 P1-04: 预测语义修正（predict_linear 返回剩余秒数，非布尔）
+  # 之前 node:filesystem_predicted_full_hours 是布尔 (<0 表示 4h 内将满)
+  # 现拆为三档记录：剩余秒数 / 4h 阈值告警 / 24h 阈值告警
+  # ===========================================================================
+  - name: filesystem-prediction-records
+    interval: 5m
+    rules:
+      # 剩余可用秒数（>0 = 安全；<=0 = 已写满或不收缩）
+      # v3.0.0-rc4 audit-blocking 修复（B04）：
+      #   - 原公式 deriv(avail[1h])[1h] 是非法子查询（range selector 套在 subquery 结果上）。
+      #     修复：直接对 avail_bytes 做 predict_linear，得到 4h 后的预测值，再算"剩余秒数"。
+      #   - 仅在持续下降时输出有效秒数（平稳/增长输出 0，避免把稳定空间误解释为耗尽）。
+      #   - clamp_min(-predict_linear, 1) 防除零；* bool(predict_linear < 0) 屏蔽非下降分支。
+      - record: node:filesystem_seconds_until_full
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}
+            /
+            clamp_min(
+              -predict_linear(
+                node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}[6h],
+                4 * 3600
+              ),
+              1
+            )
+          )
+          * on(instance, mountpoint, fstype) (
+            predict_linear(
+              node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}[6h],
+              4 * 3600
+            ) < 0
+          )
+
+      # 4 小时内将满（布尔）
+      # v3.0.0-rc4 audit-blocking 修复（B04）：Prometheus 2.x 比较运算符 (<, >, ==) 在
+      # instant vector 与 scalar 比较时已返回 0/1 bool，无需显式 bool() 修饰（bool() 函数
+      # 在 2.53+ 才引入，本仓库最低支持 2.42）。语义已为 bool：1=将满 / 0=未满。
+      - record: node:filesystem_will_be_full:4h
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}[6h],
+            4 * 3600
+          ) < 0
+        # 已废弃标注（v3.0.0-rc4 P1-04）：仍可作为布尔触发器；下个版本用 seconds_until_full 替换
+        labels:
+          legacy: "true"
+
+      # 24 小时内将满（布尔，预警告警用）
+      # v3.0.0-rc4 audit-blocking 修复（B04）：同 4h 版本，比较已天然返回 0/1。
+      - record: node:filesystem_will_be_full:24h
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype=~"ext[234]?|xfs|btrfs|zfs", mountpoint!~"/boot|/run|/var/lib/(docker|containers|kubelet/pods).*"}[12h],
+            24 * 3600
+          ) < 0
+
+  # ===========================================================================
+  # TCP / UDP 错误
+  # ===========================================================================
+  - name: netstat-records
+    interval: 1m
+    rules:
+      - record: node:tcp_retransmission:percent
+        expr: |
+          rate(node_netstat_Tcp_RetransSegs[5m])
+          /
+          clamp_min(rate(node_netstat_Tcp_OutSegs[5m]), 1) * 100
+
+      - record: node:tcp_curr_estab:sum
+        expr: sum without (cpu, mode) (node_netstat_Tcp_CurrEstab)
+
+      - record: node:listen_overflows:rate5m
+        expr: rate(node_netstat_TcpExt_ListenOverflows[5m])
+
+  # ===========================================================================
+  # 文件描述符 / 进程
+  # ===========================================================================
+  - name: system-records
+    interval: 1m
+    rules:
+      - record: node:filefd_usage:percent
+        expr: node_filefd_allocated / node_filefd_maximum * 100
+
+      - record: node:conntrack_usage:percent
+        expr: node_nf_conntrack_entries / node_nf_conntrack_entries_limit * 100
+
+      - record: node:processes:total
+        expr: node_processes_total
+
+  # ===========================================================================
+  # PSI 资源压力（内核 ≥4.20；irq PSI 需 ≥6.1）
+  # ===========================================================================
+  # 审核 §12.5 P0-05: PSI 先求速率再聚合（累计秒数直接聚合方向错）
+  - name: pressure-records
+    interval: 1m
+    rules:
+      # 先 rate 再 max：CPU/内存/IO 分别求速率，取最大值
+      - record: node:resource_pressure:max
+        expr: |
+          max (
+            rate(node_pressure_cpu_waiting_seconds_total[5m]) * 100
+            or on (instance) rate(node_pressure_memory_waiting_seconds_total[5m]) * 100
+            or on (instance) rate(node_pressure_io_waiting_seconds_total[5m]) * 100
+          )
+
+      - record: node:pressure_cpu_waiting:rate5m
+        expr: rate(node_pressure_cpu_waiting_seconds_total[5m]) * 100
+
+      - record: node:pressure_memory_waiting:rate5m
+        expr: rate(node_pressure_memory_waiting_seconds_total[5m]) * 100
+
+      - record: node:pressure_io_waiting:rate5m
+        expr: rate(node_pressure_io_waiting_seconds_total[5m]) * 100

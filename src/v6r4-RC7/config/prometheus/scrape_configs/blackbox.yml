@@ -1,0 +1,147 @@
+# ==============================================================================
+# scrape_configs/blackbox.yml
+#
+# Blackbox Exporter 抓取配置（blackbox_exporter 0.25.0+）
+# 适用：探测 HTTP/HTTPS/TCP/ICMP 目标
+#
+# v3.0.0-rc4 P0-04 + audit-blocking B03：
+#   - 文件 SD 路径用 `__PROM_FILE_SD_BASE__` 占位符（installer sed 替换）
+#   - 默认监听端口 ${BLACKBOX_PORT}（9115）由 installer 显式替换；capture group ${1} 保留原样
+#   - 与 edge VM K8s 集成互不干扰
+#   - 探测超时与失败判定指标收敛（probe_success / probe_duration_seconds）
+#   - 与 P1-17 站点失联区分保持一致：up 维度通过 probe_success 表示
+#
+# 02 §2.4 红线：
+#   - 不抓 probe_failed_due_to_regex
+#   - probe_http_status_code 仅保留判定结果，不暴露完整 headers
+#   - 探测 SSL/TLS 证书过期日期（probe_ssl_earliest_cert_expiry）
+# ==============================================================================
+
+scrape_configs:
+  - job_name: blackbox_http
+    metrics_path: /probe
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/blackbox/http/*.json'
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: '127.0.0.1:${BLACKBOX_PORT}'
+      - source_labels: [site]
+        target_label: site
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+      - source_labels: [target_role]
+        target_label: target_role
+      - target_label: job
+        replacement: blackbox_http
+      - target_label: asset_type
+        replacement: external_target
+      - target_label: role
+        replacement: blackbox
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'probe_(success|duration_seconds|ssl_earliest_cert_expiry|http_status_code|http_redirects|ip_protocol|ip_addr).*'
+        action: keep
+
+  - job_name: blackbox_tcp
+    metrics_path: /probe
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    params:
+      module: [tcp_connect]
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/blackbox/tcp/*.json'
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: '127.0.0.1:${BLACKBOX_PORT}'
+      - source_labels: [site]
+        target_label: site
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+      - target_label: job
+        replacement: blackbox_tcp
+      - target_label: asset_type
+        replacement: external_target
+      - target_label: role
+        replacement: blackbox
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'probe_(success|duration_seconds).*'
+        action: keep
+
+  - job_name: blackbox_icmp
+    metrics_path: /probe
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    params:
+      module: [icmp]
+    file_sd_configs:
+      - files:
+          - '__PROM_FILE_SD_BASE__/blackbox/icmp/*.json'
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: '127.0.0.1:${BLACKBOX_PORT}'
+      - source_labels: [site]
+        target_label: site
+      - source_labels: [env]
+        target_label: env
+      - source_labels: [alert_policy]
+        target_label: alert_policy
+      - target_label: job
+        replacement: blackbox_icmp
+      - target_label: asset_type
+        replacement: external_target
+      - target_label: role
+        replacement: blackbox
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'probe_(success|duration_seconds).*'
+        action: keep
+
+  # ==============================================================================
+  # 占位目标清单（targets/blackbox/.gitkeep）：
+  #
+  # HTTP:
+  # {
+  #   "targets": ["https://api.example.com/health"],
+  #   "labels": { "site": "primary", "env": "prod", "alert_policy": "prod" }
+  # }
+  #
+  # TCP:
+  # {
+  #   "targets": ["mysql-primary:3306"],
+  #   "labels": { "site": "primary", "env": "prod", "alert_policy": "prod" }
+  # }
+  #
+  # ICMP:
+  # {
+  #   "targets": ["192.0.2.1"],
+  #   "labels": { "site": "primary", "env": "prod", "alert_policy": "prod" }
+  # }
+  #
+  # PLACEHOLDER blackbox: enabled=false
+  # ==============================================================================

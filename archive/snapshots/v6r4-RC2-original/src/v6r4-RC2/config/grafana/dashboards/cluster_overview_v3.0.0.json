@@ -1,0 +1,167 @@
+# ==============================================================================
+# grafana/dashboards/cluster_overview_v3.0.0.json
+#
+# 审核 P1-20: Grafana 查询与运维分析面板
+# 占位 JSON（详细面板待 v3.0.0-rc5 完整发布）
+# ==============================================================================
+{
+  "title": "Cluster Overview (Prometheus v3)",
+  "uid": "prom-cluster-overview-v3",
+  "tags": ["prometheus", "v3", "overview"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, site)",
+        "refresh": 2,
+        "includeAll": true
+      },
+      {
+        "name": "env",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, env)",
+        "refresh": 2,
+        "includeAll": true
+      },
+      {
+        "name": "alert_policy",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, alert_policy)",
+        "refresh": 2,
+        "includeAll": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Node CPU Usage (recording: node:cpu_usage:percent)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "node:cpu_usage:percent{site=~\"$site\", env=~\"$env\", alert_policy=~\"$alert_policy\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Filesystem Usage (canonical by mountpoint)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "node:filesystem_usage:percent_canonical{site=~\"$site\", env=~\"$env\", alert_policy=~\"$alert_policy\"}",
+          "legendFormat": "{{instance}}:{{mountpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "SLO 28d Error Budget Remaining",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "slo:probe_availability:error_budget_remaining:28d",
+          "legendFormat": "budget",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 25},
+              {"color": "green", "value": 50}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "SLO Burn Rate (multi-window)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 6, "w": 12, "x": 6, "y": 8},
+      "targets": [
+        {
+          "expr": "slo:probe_availability:burn_rate:5m",
+          "legendFormat": "5m",
+          "refId": "A"
+        },
+        {
+          "expr": "slo:probe_availability:burn_rate:30m",
+          "legendFormat": "30m",
+          "refId": "B"
+        },
+        {
+          "expr": "slo:probe_availability:burn_rate:6h",
+          "legendFormat": "6h",
+          "refId": "C"
+        },
+        {
+          "expr": "slo:probe_availability:burn_rate:24h",
+          "legendFormat": "24h",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Container CPU Quota Used vs Throttle",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "targets": [
+        {
+          "expr": "container:cpu_quota_used:percent{site=~\"$site\"}",
+          "legendFormat": "quota_used {{name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(container_cpu_cfs_throttled_seconds_total[5m]) * 100",
+          "legendFormat": "throttle_pct {{name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Switch Interface Utilization (in/out)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "targets": [
+        {
+          "expr": "ifInOctets * 8 / ifSpeed * 100",
+          "legendFormat": "in {{instance}}:{{ifName}}",
+          "refId": "A"
+        },
+        {
+          "expr": "ifOutOctets * 8 / ifSpeed * 100",
+          "legendFormat": "out {{instance}}:{{ifName}}",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

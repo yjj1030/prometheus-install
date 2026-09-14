@@ -1,0 +1,137 @@
+# ==============================================================================
+# scrape_failure_alerts_v3.0.0.yml
+#
+# 审核 P1-17: 抓取失败 / 目标消失 / 站点失联 三类语义必须区分
+#
+# 三种故障的本质：
+#   - 抓取失败 (Scrape Failed)     ：Prometheus 调用 metrics 端点失败（HTTP 5xx/timeout）
+#                                    可能是瞬时网络抖动；目标进程还在
+#   - 目标消失 (Target Gone)       ：target 列表中已无此 instance
+#                                    通常意味着 host/service 已下线，或 file_sd 配置错误
+#   - 站点失联 (Site Unreachable)  ：整个 site 范围内 up=0
+#                                    通常意味着机房 / 网络 / VPN 故障
+#
+# 区别在于修复路径完全不同：
+#   - 抓取失败 → 检查 exporter 进程
+#   - 目标消失 → 检查 service unit / file_sd 配置
+#   - 站点失联 → 联系机房 / 切流量
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 抓取失败（Prometheus 调用 metrics 端点失败，但目标仍在 target 列表）
+  # ===========================================================================
+  - name: scrape-failure-alerts
+    interval: 30s
+    rules:
+      - alert: ScrapeFailed
+        # up == 0 但 instance 仍在 target 列表中存在
+        # 判定方法：up{job=...} == 0 AND absent_over_time(up{job=...}[10m]) == 0
+        # 简化：up==0 持续 < 10 分钟（还没被判定为 TargetGone）
+        expr: |
+          (
+            up{alert_policy!="stress"} == 0
+          )
+          and on(instance, job)
+          (
+            changes(up{alert_policy!="stress"}[10m]) > 0
+          )
+        for: 2m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: monitoring
+          alert_type: state
+          condition_id: scrape_failed
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "抓取失败 {{ $labels.job }} {{ $labels.instance }}"
+          current_value: "0"
+          threshold: "up==0 持续 ≥ 2m 且 10m 内有变化"
+          impact: "指标断流；可能瞬时网络问题或 exporter 崩溃。"
+          action: "检查 exporter 进程状态与日志；尝试 curl 端点。"
+          description: "Prometheus 调用 metrics 端点失败 2 分钟，但 10 分钟内仍有历史数据；属瞬时失败而非彻底消失。"
+
+  # ===========================================================================
+  # 2. 目标消失（target 不再出现在 file_sd 中；与站点失联区分）
+  # ===========================================================================
+  - name: target-gone-alerts
+    interval: 5m
+    rules:
+      - alert: TargetGone
+        # up==0 持续超过 10 分钟，且 10 分钟前还有数据 → 目标彻底消失
+        expr: |
+          (
+            up{alert_policy!="stress"} == 0
+          )
+          and on(instance, job)
+          (
+            absent(up{alert_policy!="stress"})
+            or
+            (changes(up{alert_policy!="stress"}[10m]) == 0 and up{alert_policy!="stress"} offset 5m == 0)
+          )
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: monitoring
+          category: monitoring
+          alert_type: state
+          condition_id: target_gone
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "目标消失 {{ $labels.job }} {{ $labels.instance }}"
+          current_value: "0"
+          threshold: "up==0 持续 ≥ 10m 且无变化"
+          impact: "目标从监控视野彻底消失；可能 host/service 已下线。"
+          action: "检查 service unit 状态、file_sd 配置、节点可达性。"
+          description: "目标连续 10 分钟无任何 metrics；判定为消失而非抖动。"
+
+  # ===========================================================================
+  # 3. 站点失联（site 维度；多个 job 同时 up=0）
+  # ===========================================================================
+  - name: site-unreachable-alerts
+    interval: 1m
+    rules:
+      - alert: SiteUnreachable
+        # 同一 site 下多个独立 job 同时 up=0（≥ 3 个 job）
+        expr: |
+          (
+            count by (site) (
+              up{alert_policy!="stress"} == 0
+            )
+            >=
+            3
+          )
+          and
+          (
+            count by (site) (up{alert_policy!="stress"}) > 0
+          )
+        for: 5m
+        labels:
+          severity: emergency
+          asset_type: monitoring
+          category: availability
+          alert_type: state
+          condition_id: site_unreachable
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "site {{ $labels.site }} 失联：≥ 3 个 job 同时 up=0"
+          current_value: "{{ printf \"%.0f\" $value }} 个 job 失败"
+          threshold: "≥ 3 个 job 同时 up=0 持续 ≥ 5m"
+          impact: "整个 site 监控失效；可能机房/网络/VPN 故障。"
+          action: "联系机房；检查 VPN；评估是否启动灾备。"
+          description: "同一 site 下 ≥ 3 个独立 job 全部 up=0 持续 5 分钟；属站点级故障。"
+
+  # ===========================================================================
+  # 4. 抑制链路（站点失联时抑制单目标告警，避免风暴）
+  # ===========================================================================
+  # 在 alertmanager.yml 中添加：
+  #   inhibit_rules:
+  #     - source_matchers:
+  #         - alertname="SiteUnreachable"
+  #       target_matchers:
+  #         - alertname=~"ScrapeFailed|TargetGone"
+  #       equal: ['site']
+
+# PLACEHOLDER scrape-failure-alerts: enabled=false

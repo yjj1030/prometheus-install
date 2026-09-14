@@ -1,0 +1,180 @@
+# ==============================================================================
+# service_time_alerts_v3.0.0.yml
+#
+# 审核 P1-14: 服务时段 / 跨午夜 / 汇总分开
+#
+# 三类语义必须分开：
+#   1. 服务时段（business hours）告警：仅在 09:00-21:00 (Asia/Shanghai) 触发
+#   2. 跨午夜窗口（23:00-08:00）告警：必须拆为两段独立判定，避免遗漏
+#   3. 汇总告警（24h 累计 / 跨天）：用专门记录规则而非直接查询 raw 数据
+#
+# 实现方式：
+#   - 服务时段过滤：在 expr 中加 (hour() >= 9 and hour() < 21)
+#   - 跨午夜拆分：在 expr 中显式分段 (hour() >= 23 or hour() < 8)
+#   - 汇总记录规则：见 service_hours-records 系列，24h rolling 窗口
+#
+# PLACEHOLDER service-time-alerts: enabled=false
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 业务时段告警（仅 09:00-21:00 触发；夜间仅记录，不发告警）
+  # ===========================================================================
+  - name: business-hours-alerts
+    interval: 5m
+    rules:
+      - alert: BusinessHoursLatencyHigh
+        # 仅在业务时段生效；夜间 fast 路径不告警
+        expr: |
+          (
+            histogram_quantile(0.99,
+              sum by (le, service) (
+                rate(http_request_duration_seconds_bucket{service!="", alert_policy="prod"}[5m])
+              )
+            ) > 1.0
+          )
+          and on() (hour() >= 9 and hour() < 21)
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: web
+          category: performance
+          alert_type: threshold
+          condition_id: business_hours_latency_high
+          notify_profile: performance_storage
+        annotations:
+          summary: "业务时段 {{ $labels.service }} p99 延迟 {{ printf \"%.2f\" $value }}s"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "1s（仅 09:00-21:00 生效）"
+          impact: "用户体验下降。"
+          action: "查看应用日志与 DB 慢查询；通知值班。"
+          description: "业务时段服务 p99 延迟持续 10 分钟超过 1s。"
+
+  # ===========================================================================
+  # 2. 跨午夜窗口告警（拆为两段独立 expr，避免遗漏）
+  # ===========================================================================
+  # 问题：23:00-08:00 的窗口如果用 (hour() >= 23 and hour() < 8) 是空集（永远 false）
+  # 解决：拆为 (hour() >= 23) OR (hour() < 8)
+  - name: overnight-window-alerts
+    interval: 5m
+    rules:
+      - alert: NightlyBatchSlow
+        # 夜间批处理超时告警（23:00-08:00 拆分）
+        expr: |
+          (
+            time() - max by (job) (timestamp(batch_last_complete_time_seconds{alert_policy!="stress"}))
+            > 7200
+          )
+          and on() ((hour() >= 23) or (hour() < 8))
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: application
+          category: performance
+          alert_type: threshold
+          condition_id: nightly_batch_slow
+          notify_profile: business
+        annotations:
+          summary: "夜间批处理 {{ $labels.job }} 已 2 小时未完成"
+          current_value: "{{ printf \"%.0f\" $value }}s"
+          threshold: "7200s（仅 23:00-08:00 生效）"
+          impact: "次日业务数据未就绪。"
+          action: "登录服务器查看批处理日志。"
+          description: "夜间批处理任务超过 2 小时未完成；窗口已拆分为 23:00-24:00 + 00:00-08:00。"
+
+  # ===========================================================================
+  # 3. 汇总告警（24h 滚动窗口；不用 hour() 过滤）
+  # ===========================================================================
+  # v3.0.0-rc4 audit-blocking 修复（B04）：
+  #   - 原 service:daily_request_total:sum / service:daily_error_rate:percent 直接放在
+  #     groups: 数组顶层（line 89/95），不在任何具名 group 的 rules: 内。Prometheus 规则结构
+  #     不接受顶层 record，会被 promtool check rules 拒绝。
+  #   - 修复：新建 daily-summary-records group 把这两条 record 收纳；daily-summary-alerts
+  #     group 引用 service:daily_error_rate:percent 仍可正常解析。
+  - name: daily-summary-records
+    interval: 1h
+    rules:
+      - record: service:daily_request_total:sum
+        expr: |
+          sum by (service, site, env) (
+            increase(http_requests_total{alert_policy!="stress"}[24h])
+          )
+
+      - record: service:daily_error_rate:percent
+        expr: |
+          100 * (
+            sum by (service, site, env) (rate(http_requests_total{status=~"5..", alert_policy!="stress"}[24h]))
+            /
+            clamp_min(
+              sum by (service, site, env) (rate(http_requests_total{alert_policy!="stress"}[24h])),
+              0.001
+            )
+          )
+
+  - name: daily-summary-alerts
+    interval: 1h
+    rules:
+      - alert: ServiceDailyErrorRateHigh
+        expr: service:daily_error_rate:percent{alert_policy!="stress"} > 1
+        for: 1h
+        labels:
+          severity: warning
+          asset_type: web
+          category: performance
+          alert_type: threshold
+          condition_id: service_daily_error_high
+          notify_profile: performance_storage
+        annotations:
+          summary: "{{ $labels.service }} 24h 错误率 {{ printf \"%.2f\" $value }}% > 1%"
+          current_value: "{{ printf \"%.2f\" $value }}%"
+          threshold: "1%（24h 滚动窗口）"
+          impact: "整体错误率高于基线。"
+          action: "查看错误码分布；定位上游依赖问题。"
+          description: "服务 24h 错误率高于 1%，持续 1 小时。"
+
+      - alert: ServiceDailyTrafficDrop
+        # 24h 总请求量较昨日同期下降 ≥ 50%
+        expr: |
+          (
+            service:daily_request_total:sum{alert_policy!="stress"}
+            <
+            service:daily_request_total:sum{alert_policy!="stress"} offset 1d
+            * 0.5
+          )
+          and on() (hour() >= 10)  # 仅白天比对（避免跨午夜误报）
+        for: 2h
+        labels:
+          severity: warning
+          asset_type: web
+          category: capacity
+          alert_type: state
+          condition_id: service_daily_traffic_drop
+          notify_profile: business
+        annotations:
+          summary: "{{ $labels.service }} 24h 流量较昨日下降 ≥ 50%"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "today < 0.5 * yesterday"
+          impact: "可能上游断流或客户端迁移。"
+          action: "对照业务方公告；检查 DNS/负载均衡。"
+          description: "服务 24h 流量较昨日同期下降超过 50%，持续 2 小时。"
+
+  # ===========================================================================
+  # 4. 抑制规则（服务时段内的告警不应在夜间触发）
+  # ===========================================================================
+  # 实际抑制在 alertmanager.yml 中通过 mute_time_intervals 实现：
+  #
+  # mute_time_intervals:
+  #   - name: business_hours
+  #     time_intervals:
+  #       - times:
+  #           - start_time: '09:00'
+  #             end_time:   '21:00'
+  #
+  # routes:
+  #   - matchers:
+  #       - notify_profile = "business"
+  #     mute_time_intervals:
+  #       - business_hours_inverse
+  #
+  # 这样夜间 business profile 告警自动抑制，不发到 ops 渠道

@@ -1,0 +1,511 @@
+# ==============================================================================
+# node_alerts_v3.0.0_prod.yml
+#
+# 节点/主机 告警规则 (prod 环境, alert_policy=prod|nonprod)
+#   - 压测目标 alert_policy="stress" 由 node_alerts_v1.0.0_stress.yml 单独承载
+#   - 本文件 alert_policy!="stress" 过滤
+#
+# 标签契约（01 §2.4 + 02 §6.2 equal 陷阱）：
+#   severity / asset_type / alert_type / condition_id / notify_profile
+#   + site / origin_prometheus / job / instance 由体系注入（六者必须在每条告警上恒存在）
+# 通知六元组 annotations: summary / current_value / threshold / impact / action / description
+# 抑制 equal 键: condition_id + site + origin_prometheus + job + instance + device + mountpoint
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 节点可用性 (state)
+  # ===========================================================================
+  - name: node-availability-alerts
+    interval: 30s
+    rules:
+      - alert: NodeDown
+        expr: up{job="node_exporter", alert_policy!="stress"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: node_down
+          notify_profile: availability
+        annotations:
+          summary: "节点 {{ $labels.instance }} 已 3 分钟不可达"
+          current_value: "{{ printf \"up=%v\" $value }}"
+          threshold: "up == 0 持续 ≥ 3m"
+          impact: "主机所有监控失效；本地工具与 SSH 仍可能可用。"
+          action: "登录主机查看 node_exporter 与网络/防火墙；必要时重启服务。"
+          description: "node_exporter 在 instance={{ $labels.instance }} site={{ $labels.site }} 上 up==0 持续 3 分钟。"
+
+      - alert: NodeFlapping
+        expr: changes(up{job="node_exporter", alert_policy!="stress"}[30m]) > 8
+        labels:
+          severity: warning
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: node_flapping
+          notify_profile: availability
+        annotations:
+          summary: "节点 {{ $labels.instance }} 30 分钟内 up 抖动 > 8 次"
+          current_value: "{{ printf \"changes=%v\" $value }}"
+          threshold: "30m 内变化次数 > 8"
+          impact: "间歇性数据丢失，告警可能产生风暴。"
+          action: "检查 node_exporter 服务稳定性与主机网络抖动。"
+          description: "抓取状态在 30 分钟内变化超过 8 次。"
+
+  # ===========================================================================
+  # 2. CPU / 负载（threshold, 多级不重叠）
+  # ===========================================================================
+  - name: node-cpu-alerts
+    interval: 30s
+    rules:
+      - alert: HostCPUHighWarning
+        expr: |
+          node:cpu_usage:percent{alert_policy!="stress"} > 75
+          unless on (instance) (node_uname_info == 0)
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_cpu_high
+          notify_profile: resource_cpu
+        annotations:
+          summary: "{{ $labels.instance }} CPU {{ printf \"%.1f\" $value }}% > 75% (10m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "75%"
+          impact: "服务响应变慢。"
+          action: "top/ps 排查热点进程，必要时扩容或迁移。"
+          description: "10 分钟平均 CPU 使用率持续超过 75%。"
+
+      - alert: HostCPUHighCritical
+        expr: node:cpu_usage:percent{alert_policy!="stress"} > 90
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_cpu_high
+          notify_profile: resource_cpu
+        annotations:
+          summary: "{{ $labels.instance }} CPU {{ printf \"%.1f\" $value }}% > 90% (5m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "90%"
+          impact: "新请求极可能失败。"
+          action: "立即缓解：排查热点进程/迁移/扩容。"
+          description: "5 分钟平均 CPU 持续超过 90%。"
+
+      - alert: HostCPUHighEmergency
+        expr: node:cpu_usage:percent{alert_policy!="stress"} > 97
+        for: 3m
+        labels:
+          severity: emergency
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_cpu_high
+          notify_profile: resource_cpu
+        annotations:
+          summary: "{{ $labels.instance }} CPU {{ printf \"%.1f\" $value }}% > 97% (3m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "97%"
+          impact: "核心服务基本不可用。"
+          action: "立即介入；必要时重启关键进程或切流。"
+          description: "主机 CPU 已经接近饱和。"
+
+      - alert: HostLoadHighWarning
+        expr: node:load_per_core:rate1m{alert_policy!="stress"} > 1.5
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_load_high
+          notify_profile: performance_storage
+        annotations:
+          summary: "{{ $labels.instance }} 5m load/core = {{ printf \"%.2f\" $value }} > 1.5"
+          current_value: "{{ printf \"%.2f\" $value }}"
+          threshold: "1.5"
+          impact: "任务排队。"
+          action: "结合 CPU/IO 排查热点；load 高但 CPU 低通常为 IO 阻塞。"
+          description: "5m load / 核数 持续 15 分钟超过 1.5。"
+
+  - name: node-memory-alerts
+    interval: 30s
+    rules:
+      - alert: HostMemoryHighWarning
+        expr: node:memory_usage:percent{alert_policy!="stress"} > 80
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_mem_high
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 内存使用 {{ printf \"%.1f\" $value }}% > 80%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "新进程/连接可能被 OOM-killer 终止。"
+          action: "排查大内存进程；必要时扩容。"
+          description: "可用内存持续 10 分钟低于 20%。"
+
+      - alert: HostMemoryHighCritical
+        expr: node:memory_usage:percent{alert_policy!="stress"} > 92
+        for: 5m
+        labels:
+          severity: critical
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_mem_high
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 内存使用 {{ printf \"%.1f\" $value }}% > 92% (5m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "92%"
+          impact: "OOM-killer 即将介入。"
+          action: "立即排查大内存进程；必要时重启/迁移。"
+          description: "可用内存低于 8%。"
+
+      - alert: HostMemoryHighEmergency
+        expr: node_memory_MemAvailable_bytes{alert_policy!="stress"} / 1024 / 1024 < 100
+        for: 2m
+        labels:
+          severity: emergency
+          asset_type: server
+          category: resource
+          alert_type: threshold
+          condition_id: host_mem_high
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 可用内存 < 100 MiB (2m)"
+          current_value: "{{ printf \"%.0f\" $value }} MiB"
+          threshold: "100 MiB"
+          impact: "进程随时被 OOM-killer 终止。"
+          action: "立即手工释放或迁移。"
+          description: "可用内存不足 100 MiB，OOM 风险极高。"
+
+      - alert: HostSwapHeavy
+        expr: node_vmstat_pswpin{alert_policy!="stress"} > 0
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: resource
+          alert_type: event
+          condition_id: host_swap_heavy
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 正在频繁换入"
+          current_value: "{{ printf \"%.0f\" $value }}/10m"
+          threshold: "> 0 pswpin/10m"
+          impact: "IO 抖动明显。"
+          action: "结合内存使用率判断，必要时扩容。"
+          description: "vmstat.pswpin 在 10 分钟内大于 0。"
+
+  # ===========================================================================
+  # 3. 磁盘（capacity / forecast）
+  # ===========================================================================
+  - name: node-disk-alerts
+    interval: 30s
+    rules:
+      - alert: HostDiskSpaceLowWarning
+        expr: node:filesystem_usage:percent{alert_policy!="stress"} > 75
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_disk_low
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘使用 {{ printf \"%.1f\" $value }}% > 75%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "75%"
+          impact: "后续写入可能失败。"
+          action: "清理日志或扩容。"
+          description: "canonical 去重后磁盘使用持续 30 分钟超过 75%。"
+
+      - alert: HostDiskSpaceLowCritical
+        expr: node:filesystem_usage:percent{alert_policy!="stress"} > 90
+        for: 10m
+        labels:
+          severity: critical
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_disk_low
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘使用 {{ printf \"%.1f\" $value }}% > 90%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "90%"
+          impact: "进程将无法写入新文件。"
+          action: "立即清理，避免关键进程崩溃。"
+          description: "磁盘使用 10 分钟超过 90%。"
+
+      - alert: HostDiskPredictedFull
+        expr: node:filesystem_predicted_full_hours{alert_policy!="stress"}
+        for: 1h
+        labels:
+          severity: emergency
+          asset_type: server
+          category: capacity
+          alert_type: forecast
+          condition_id: host_disk_low
+          notify_profile: capacity_forecast
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘将在 4 小时内写满"
+          current_value: "predicted avail < 0 in 4h"
+          threshold: "predict_linear 6h → 4h 写满"
+          impact: "服务将很快因磁盘写满失败。"
+          action: "提前扩容或迁移；不要等 critical。"
+          description: "基于 6 小时线性预测，4 小时后将无可用空间。"
+
+      - alert: HostDiskIOHigh
+        expr: node:disk_io_utilization:max:rate5m{alert_policy!="stress"} > 80
+        for: 15m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_disk_io_high
+          notify_profile: performance_storage
+        annotations:
+          summary: "{{ $labels.instance }} 磁盘 IO 利用率 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "读写时延显著上升。"
+          action: "iotop/iostat 排查热点；必要时换 SSD。"
+          description: "磁盘 IO 持续 15 分钟高位运行。"
+
+      - alert: HostInodeLow
+        expr: node:filesystem_inode_free:percent{alert_policy!="stress"} < 10
+        for: 30m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_inode_low
+          notify_profile: capacity_filesystem
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} inode 剩余 < 10%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "10%"
+          impact: "小文件场景下写入失败。"
+          action: "清理小文件或调整文件系统参数。"
+          description: "inode 几乎耗尽。"
+
+  # ===========================================================================
+  # 4. 网络
+  # ===========================================================================
+  - name: node-network-alerts
+    interval: 30s
+    rules:
+      - alert: HostNetworkReceiveErrors
+        expr: node:network_receive_errs:rate5m{alert_policy!="stress"} > 5
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_net_err
+          notify_profile: network_quality
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.device }} 入向错误包 {{ printf \"%.2f\" $value }}/s"
+          current_value: "{{ printf \"%.2f\" $value }}/s"
+          threshold: "5/s"
+          impact: "上层服务时延上升。"
+          action: "检查网卡/网线/SFP 模块状态。"
+          description: "5 分钟平均错误包速率超过 5/s。"
+
+      - alert: HostNetworkDown
+        expr: node_network_carrier{alert_policy!="stress"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          asset_type: server
+          category: availability
+          alert_type: state
+          condition_id: host_net_down
+          notify_profile: network_bandwidth
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.device }} 链路已 down 2 分钟"
+          current_value: "carrier=0"
+          threshold: "carrier == 0 持续 ≥ 2m"
+          impact: "主机该网卡失联。"
+          action: "排查物理链路与交换机端口。"
+          description: "网卡 carrier==0 持续 2 分钟。"
+
+      - alert: HostConntrackFull
+        expr: node:conntrack_usage:percent{alert_policy!="stress"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_conntrack_high
+          notify_profile: system_limit
+        annotations:
+          summary: "{{ $labels.instance }} conntrack 已用 {{ printf \"%.1f\" $value }}%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "80%"
+          impact: "新连接可能被丢弃。"
+          action: "调大 nf_conntrack_max 或排查异常连接。"
+          description: "连接跟踪表使用率超过 80%。"
+
+  # ===========================================================================
+  # 5. 文件描述符 / 进程 / 系统
+  # ===========================================================================
+  - name: node-fd-alerts
+    interval: 30s
+    rules:
+      - alert: HostFileDescriptorHigh
+        expr: node:filefd_usage:percent{alert_policy!="stress"} > 75
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_fd_high
+          notify_profile: system_limit
+        annotations:
+          summary: "{{ $labels.instance }} fd 使用 {{ printf \"%.1f\" $value }}% > 75%"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "75%"
+          impact: "进程可能因 fd 耗尽拒绝服务。"
+          action: "排查 fd 泄漏；必要时 ulimit 调大。"
+          description: "文件描述符使用率超过 75%。"
+
+      - alert: HostProcessCountHigh
+        expr: node:processes:total{alert_policy!="stress"} > 5000
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: capacity
+          alert_type: capacity
+          condition_id: host_proc_high
+          notify_profile: system_limit
+        annotations:
+          summary: "{{ $labels.instance }} 进程数 {{ printf \"%.0f\" $value }} > 5000"
+          current_value: "{{ printf \"%.0f\" $value }}"
+          threshold: "5000"
+          impact: "调度器压力上升。"
+          action: "排查僵尸/异常 fork 风暴。"
+          description: "进程数持续 10 分钟超过 5000。"
+
+  # ===========================================================================
+  # 6. 时间同步（由体系外 Zabbix 兜底；本体系仅做观察）
+  # ===========================================================================
+  - name: node-time-alerts
+    interval: 60s
+    rules:
+      - alert: HostClockSkew
+        expr: abs(node_timex_offset_seconds{alert_policy!="stress"}) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          asset_type: server
+          category: os
+          alert_type: threshold
+          condition_id: host_clock_skew
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 时钟偏移 {{ printf \"%.2f\" $value }} 秒"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "0.5s"
+          impact: "TLS / Kerberos / 日志关联受影响。"
+          action: "检查 chrony/ntpd 同步状态。"
+          description: "时钟偏移大于 0.5s 持续 5 分钟。"
+
+      - alert: HostClockSkewCritical
+        expr: abs(node_timex_offset_seconds{alert_policy!="stress"}) > 5
+        for: 2m
+        labels:
+          severity: critical
+          asset_type: server
+          category: os
+          alert_type: threshold
+          condition_id: host_clock_skew
+          notify_profile: monitoring_agent
+        annotations:
+          summary: "{{ $labels.instance }} 时钟偏移 {{ printf \"%.2f\" $value }} 秒"
+          current_value: "{{ printf \"%.2f\" $value }}s"
+          threshold: "5s"
+          impact: "TLS 握手可能失败。"
+          action: "立即介入：chronyc tracking，必要时手动 ntpdate。"
+          description: "时钟偏移大于 5s 持续 2 分钟。"
+
+  # ===========================================================================
+  # 7. PSI 资源压力（容器/虚拟化主机重点）
+  # ===========================================================================
+  - name: node-pressure-alerts
+    interval: 1m
+    rules:
+      - alert: HostPressureCpuHigh
+        expr: node:pressure_cpu_waiting:rate5m{alert_policy!="stress"} > 20
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_pressure_cpu
+          notify_profile: performance_storage
+        annotations:
+          summary: "{{ $labels.instance }} CPU 压力 {{ printf \"%.1f\" $value }}% > 20% (10m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "20%"
+          impact: "任务排队时延显著。"
+          action: "排查 CPU 热点；评估调度配置。"
+          description: "PSI cpu_waiting 持续 10 分钟超过 20%。"
+
+      - alert: HostPressureIoHigh
+        expr: node:pressure_io_waiting:rate5m{alert_policy!="stress"} > 20
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_pressure_io
+          notify_profile: performance_storage
+        annotations:
+          summary: "{{ $labels.instance }} IO 压力 {{ printf \"%.1f\" $value }}% > 20% (10m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "20%"
+          impact: "IO 任务阻塞。"
+          action: "iotop/iodiag 排查；评估存储性能。"
+          description: "PSI io_waiting 持续 10 分钟超过 20%。"
+
+      - alert: HostPressureMemoryHigh
+        expr: node:pressure_memory_waiting:rate5m{alert_policy!="stress"} > 20
+        for: 10m
+        labels:
+          severity: warning
+          asset_type: server
+          category: performance
+          alert_type: threshold
+          condition_id: host_pressure_memory
+          notify_profile: resource_memory
+        annotations:
+          summary: "{{ $labels.instance }} 内存压力 {{ printf \"%.1f\" $value }}% > 20% (10m)"
+          current_value: "{{ printf \"%.1f\" $value }}%"
+          threshold: "20%"
+          impact: "内存分配阻塞。"
+          action: "排查内存泄漏/超额分配。"
+          description: "PSI memory_waiting 持续 10 分钟超过 20%。"

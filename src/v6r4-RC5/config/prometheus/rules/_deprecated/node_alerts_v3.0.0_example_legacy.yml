@@ -1,0 +1,514 @@
+# ==============================================================================
+# node_alerts_v3.0.0.yml
+#
+# 节点/主机/网络/磁盘/SSL 等 4 级告警规则 (v3 系列)
+#
+# 标签契约:
+#   severity       : info | warning | critical | emergency
+#   category       : hardware | os | network | application | security | monitoring
+#   notify_profile : business | operations | platform
+#   condition_id   : 唯一条件 ID, 抑制链路键
+#
+# 仅用作示例与基线; 实际阈值请结合容量规划调整。
+# ==============================================================================
+
+groups:
+
+  # ===========================================================================
+  # 1. 节点 UP/DOWN
+  # ===========================================================================
+  - name: node-availability-alerts
+    interval: 30s
+    rules:
+      - alert: NodeDown
+        expr: up{job="node_exporter"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: monitoring
+          notify_profile: platform
+          condition_id: NODE_DOWN
+        annotations:
+          summary: "Node {{ $labels.instance }} 已 3 分钟不可达"
+          description: "node_exporter 在 instance={{ $labels.instance }}, site={{ $labels.site }} 上 up==0 持续 3 分钟。"
+          impact: "主机所有监控失效, 主机自身日志与本地工具仍可访问。"
+          action: "SSH 到主机查看 node_exporter 状态, 必要时重启服务并检查主机网络/防火墙。"
+
+      - alert: NodeFlapping
+        expr: changes(up{job="node_exporter"}[30m]) > 8
+        for: 0m
+        labels:
+          severity: warning
+          category: monitoring
+          notify_profile: platform
+          condition_id: NODE_FLAPPING
+        annotations:
+          summary: "Node {{ $labels.instance }} 频繁抖动"
+          description: "30 分钟内 up 状态变化超过 8 次。"
+          impact: "间歇性数据丢失, 告警可能产生风暴。"
+          action: "检查 node_exporter 服务稳定性与主机网络抖动。"
+
+  # ===========================================================================
+  # 2. CPU / 内存 / 负载
+  # ===========================================================================
+  - name: node-cpu-alerts
+    interval: 30s
+    rules:
+      - alert: HostCPUHighWarning
+        expr: 100 - (avg by (instance, site) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 75
+        for: 10m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_CPU_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} CPU 使用率 {{ printf \"%.1f\" $value }}% > 75% (10m)"
+          description: "主机 CPU 平均使用率持续 10 分钟超过 75%。"
+          impact: "服务响应变慢, 可能引发级联故障。"
+          action: "top/ps 排查占用进程, 必要时扩容或迁移。"
+
+      - alert: HostCPUHighCritical
+        expr: 100 - (avg by (instance, site) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: os
+          notify_profile: platform
+          condition_id: HOST_CPU_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} CPU 使用率 {{ printf \"%.1f\" $value }}% > 90% (5m)"
+          description: "主机 CPU 持续 5 分钟超过 90%。"
+          impact: "新请求极可能失败, 服务进入不可用状态。"
+          action: "立即缓解: 排查热点进程/迁移/扩容; 同时核验是否伴随 load/memory 异常。"
+
+      - alert: HostCPUHighEmergency
+        expr: 100 - (avg by (instance, site) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 97
+        for: 3m
+        labels:
+          severity: emergency
+          category: os
+          notify_profile: platform
+          condition_id: HOST_CPU_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} CPU 使用率 {{ printf \"%.1f\" $value }}% > 97% (3m)"
+          description: "主机 CPU 已经接近饱和, 持续超过 3 分钟。"
+          impact: "核心服务基本不可用。"
+          action: "立即介入; 必要时重启关键进程或切流。"
+
+      - alert: HostLoadHighWarning
+        expr: node_load5 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 1.5
+        for: 15m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_LOAD_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} 5 分钟平均负载较高"
+          description: "5m load / 核数 = {{ printf \"%.2f\" $value }}。"
+          impact: "任务排队, 服务时延上升。"
+          action: "结合 CPU/IO 排查热点; load 高但 CPU 低通常为 IO 阻塞。"
+
+  - name: node-memory-alerts
+    interval: 30s
+    rules:
+      - alert: HostMemoryHighWarning
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_MEM_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} 内存使用 {{ printf \"%.1f\" $value }}% > 80%"
+          description: "可用内存持续 10 分钟低于 20%。"
+          impact: "新进程/连接可能被 OOM-killer 终止。"
+          action: "排查大内存进程, 必要时扩容。"
+
+      - alert: HostMemoryHighCritical
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 92
+        for: 5m
+        labels:
+          severity: critical
+          category: os
+          notify_profile: platform
+          condition_id: HOST_MEM_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} 内存使用 {{ printf \"%.1f\" $value }}% > 92% (5m)"
+          description: "可用内存低于 8%, 已逼近 OOM。"
+          impact: "OOM-killer 即将介入, 关键服务面临终止风险。"
+          action: "立即排查大内存进程; 必要时重启/迁移。"
+
+      - alert: HostMemoryHighEmergency
+        expr: node_memory_MemAvailable_bytes / 1024 / 1024 < 100
+        for: 2m
+        labels:
+          severity: emergency
+          category: os
+          notify_profile: platform
+          condition_id: HOST_MEM_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} 可用内存 < 100 MiB (2m)"
+          description: "可用内存已不足 100 MiB, OOM 风险极高。"
+          impact: "进程随时被终止。"
+          action: "立即手工释放或迁移; 否则 OOM-killer 将接管。"
+
+      - alert: HostSwapHeavy
+        expr: node_vmstat_pswpin > 0
+        for: 10m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_SWAP_HEAVY
+        annotations:
+          summary: "{{ $labels.instance }} 正在频繁换入"
+          description: "vmstat.pswpin 在 10 分钟内大于 0。"
+          impact: "内存不足已触发 swap, IO 抖动明显。"
+          action: "结合内存使用率一起判断, 必要时扩容。"
+
+  # ===========================================================================
+  # 3. 磁盘
+  # ===========================================================================
+  - name: node-disk-alerts
+    interval: 30s
+    rules:
+      - alert: HostDiskSpaceLowWarning
+        expr: 100 - (100 * (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > 75
+        for: 30m
+        labels:
+          severity: warning
+          category: hardware
+          notify_profile: platform
+          condition_id: HOST_DISK_LOW
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘使用 {{ printf \"%.1f\" $value }}% > 75%"
+          description: "磁盘使用持续 30 分钟超过 75%。"
+          impact: "后续写入可能失败。"
+          action: "清理日志/无用文件或扩容。"
+
+      - alert: HostDiskSpaceLowCritical
+        expr: 100 - (100 * (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})) > 90
+        for: 10m
+        labels:
+          severity: critical
+          category: hardware
+          notify_profile: platform
+          condition_id: HOST_DISK_LOW
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘使用 {{ printf \"%.1f\" $value }}% > 90%"
+          description: "磁盘使用 10 分钟超过 90%。"
+          impact: "进程将无法写入新文件。"
+          action: "立即清理, 避免关键进程崩溃。"
+
+      - alert: HostDiskPredictedFull
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 4 * 3600) < 0
+        for: 1h
+        labels:
+          severity: emergency
+          category: hardware
+          notify_profile: platform
+          condition_id: HOST_DISK_LOW
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} 磁盘将在 4 小时内写满"
+          description: "基于 6 小时线性预测, 4 小时后将无可用空间。"
+          impact: "服务将很快因磁盘写满而失败。"
+          action: "提前扩容或迁移, 不要等到告警 critical。"
+
+      - alert: HostDiskIOHigh
+        expr: rate(node_disk_io_now[5m]) > 80
+        for: 15m
+        labels:
+          severity: warning
+          category: hardware
+          notify_profile: platform
+          condition_id: HOST_DISK_IO_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.device }} IO 利用率 {{ printf \"%.1f\" $value }}%"
+          description: "磁盘 IO 持续 15 分钟高位运行。"
+          impact: "读写时延显著上升。"
+          action: "iotop/iostat 排查热点; 必要时换 SSD。"
+
+      - alert: HostInodeLow
+        expr: node_filesystem_files_free{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_files{fstype!~"tmpfs|overlay|squashfs"} * 100 < 10
+        for: 30m
+        labels:
+          severity: warning
+          category: hardware
+          notify_profile: platform
+          condition_id: HOST_INODE_LOW
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.mountpoint }} inode 剩余 < 10%"
+          description: "inode 几乎耗尽, 即使有磁盘空间也可能无法创建新文件。"
+          impact: "大量小文件场景下写入失败。"
+          action: "清理小文件或调整文件系统参数。"
+
+  # ===========================================================================
+  # 4. 网络
+  # ===========================================================================
+  - name: node-network-alerts
+    interval: 30s
+    rules:
+      - alert: HostNetworkReceiveErrors
+        expr: rate(node_network_receive_errs_total[5m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          category: network
+          notify_profile: platform
+          condition_id: HOST_NET_ERR
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.device }} 入向错误包速率 {{ printf \"%.2f\" $value }}/s"
+          description: "网卡 5 分钟平均错误包速率超过 5/s。"
+          impact: "传输重传增加, 上层服务时延上升。"
+          action: "检查网卡/网线/SFP 模块状态, 必要时更换端口。"
+
+      - alert: HostNetworkDown
+        expr: node_network_carrier == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: network
+          notify_profile: platform
+          condition_id: HOST_NET_DOWN
+        annotations:
+          summary: "{{ $labels.instance }} {{ $labels.device }} 链路已 down 2 分钟"
+          description: "网卡 carrier==0 持续 2 分钟。"
+          impact: "主机该网卡失联。"
+          action: "排查物理链路与交换机端口。"
+
+      - alert: HostConntrackFull
+        expr: node_nf_conntrack_entries / node_nf_conntrack_entries_limit * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+          notify_profile: platform
+          condition_id: HOST_CONNTRACK_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} conntrack 已用 {{ printf \"%.1f\" $value }}%"
+          description: "连接跟踪表使用率超过 80%。"
+          impact: "新连接可能被丢弃。"
+          action: "调大 nf_conntrack_max 或排查异常连接。"
+
+  # ===========================================================================
+  # 5. 文件描述符 / 进程
+  # ===========================================================================
+  - name: node-fd-alerts
+    interval: 30s
+    rules:
+      - alert: HostFileDescriptorHigh
+        expr: node_filefd_allocated / node_filefd_maximum * 100 > 75
+        for: 10m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_FD_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} fd 使用 {{ printf \"%.1f\" $value }}% > 75%"
+          description: "文件描述符使用率超过 75%。"
+          impact: "进程可能因 fd 耗尽而拒绝服务。"
+          action: "排查 fd 泄漏; 必要时 ulimit 调大。"
+
+      - alert: HostProcessCountHigh
+        expr: node_processes_total > 5000
+        for: 10m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_PROC_HIGH
+        annotations:
+          summary: "{{ $labels.instance }} 进程数 {{ printf \"%.0f\" $value }} > 5000"
+          description: "进程数持续 10 分钟超过 5000。"
+          impact: "调度器压力上升, fork 失败概率增加。"
+          action: "排查僵尸/异常 fork 风暴。"
+
+  # ===========================================================================
+  # 6. 时间同步 / 时钟漂移
+  # ===========================================================================
+  - name: node-time-alerts
+    interval: 60s
+    rules:
+      - alert: HostClockSkew
+        expr: abs(node_timex_offset_seconds) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          category: os
+          notify_profile: platform
+          condition_id: HOST_CLOCK_SKEW
+        annotations:
+          summary: "{{ $labels.instance }} 时钟偏移 {{ printf \"%.2f\" $value }} 秒"
+          description: "时钟偏移大于 0.5s 持续 5 分钟。"
+          impact: "TLS、Kerberos、日志关联均受影响。"
+          action: "检查 chrony/ntpd 同步状态。"
+
+      - alert: HostClockSkewCritical
+        expr: abs(node_timex_offset_seconds) > 5
+        for: 2m
+        labels:
+          severity: critical
+          category: os
+          notify_profile: platform
+          condition_id: HOST_CLOCK_SKEW
+        annotations:
+          summary: "{{ $labels.instance }} 时钟偏移 {{ printf \"%.2f\" $value }} 秒"
+          description: "时钟偏移大于 5s 持续 2 分钟。"
+          impact: "TLS 握手可能失败。"
+          action: "立即介入: chronyc tracking, 必要时手动 ntpdate。"
+
+  # ===========================================================================
+  # 7. Web (HTTP/HTTPS) 探活
+  # ===========================================================================
+  - name: web-http-probe-alerts
+    interval: 30s
+    rules:
+      - alert: WebSiteDownWarning
+        expr: probe_http_status_code{job=~"blackbox-http.*"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          category: application
+          notify_profile: business
+          condition_id: WEB_DOWN
+        annotations:
+          summary: "Web {{ $labels.instance }} HTTP 探针失败"
+          description: "HTTP 探针在 3 分钟内未拿到任何状态码 (timeout/DNS/conn refused)。"
+          impact: "用户访问异常。"
+          action: "curl -v 排查; 检查 DNS/证书/应用状态。"
+
+      - alert: WebSiteDownCritical
+        expr: probe_http_status_code{job=~"blackbox-http.*"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          category: application
+          notify_profile: business
+          condition_id: WEB_DOWN
+        annotations:
+          summary: "Web {{ $labels.instance }} HTTP 探针失败 10 分钟"
+          description: "HTTP 探针持续 10 分钟无可用响应。"
+          impact: "用户无法访问。"
+          action: "切流/重启; 检查后端服务、CDN、负载均衡。"
+
+      - alert: WebSiteDegraded
+        expr: probe_http_status_code{job=~"blackbox-http.*"} >= 500
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+          notify_profile: business
+          condition_id: WEB_5XX
+        annotations:
+          summary: "Web {{ $labels.instance }} 返回 5xx"
+          description: "5 分钟内持续返回 5xx 状态码。"
+          impact: "用户访问异常。"
+          action: "查看应用日志, 关联发布/数据库/下游依赖。"
+
+      - alert: WebSiteSlowWarning
+        expr: probe_duration_seconds{job=~"blackbox-http.*"} > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: application
+          notify_profile: business
+          condition_id: WEB_SLOW
+        annotations:
+          summary: "Web {{ $labels.instance }} 响应缓慢"
+          description: "HTTP 探针耗时超过 1s 持续 10 分钟。"
+          impact: "用户体验下降。"
+          action: "结合应用监控排查慢 SQL/慢接口。"
+
+      - alert: WebSiteSlowCritical
+        expr: probe_duration_seconds{job=~"blackbox-http.*"} > 3
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+          notify_profile: business
+          condition_id: WEB_SLOW
+        annotations:
+          summary: "Web {{ $labels.instance }} 响应过慢"
+          description: "HTTP 探针耗时超过 3s 持续 5 分钟。"
+          impact: "用户大量流失。"
+          action: "立即介入; 排查 CDN/源站/数据库。"
+
+  # ===========================================================================
+  # 8. SSL 证书
+  # ===========================================================================
+  - name: ssl-cert-alerts
+    interval: 5m
+    rules:
+      - alert: SSLCertExpiringSoon30d
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 30
+        for: 30m
+        labels:
+          severity: info
+          category: security
+          notify_profile: operations
+          condition_id: SSL_EXPIRY
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          description: "证书将在不足 30 天后到期。"
+          impact: "未及时续签将导致业务不可用。"
+          action: "通知运维/业务方排期续签。"
+
+      - alert: SSLCertExpiringSoon14d
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 30m
+        labels:
+          severity: warning
+          category: security
+          notify_profile: operations
+          condition_id: SSL_EXPIRY
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          description: "证书将在不足 14 天后到期。"
+          impact: "需立即协调续签。"
+          action: "工单升级, 协调证书签发方。"
+
+      - alert: SSLCertExpiringSoon7d
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 7
+        for: 30m
+        labels:
+          severity: critical
+          category: security
+          notify_profile: operations
+          condition_id: SSL_EXPIRY
+        annotations:
+          summary: "SSL {{ $labels.instance }} {{ printf \"%.1f\" $value }} 天后过期"
+          description: "证书将在不足 7 天后到期。"
+          impact: "接近用户感知的中断窗口。"
+          action: "申请紧急续签; 同时预热备用证书。"
+
+      - alert: SSLCertExpiringEmergency
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 3600 < 48
+        for: 30m
+        labels:
+          severity: emergency
+          category: security
+          notify_profile: operations
+          condition_id: SSL_EXPIRY
+        annotations:
+          summary: "SSL {{ $labels.instance }} 48 小时内过期"
+          description: "证书将在不足 48 小时后到期。"
+          impact: "用户访问将失败。"
+          action: "立即更换证书, 协调发布。"
+
+      - alert: SSLCertInvalid
+        expr: probe_ssl_earliest_cert_expiry == 0
+        for: 10m
+        labels:
+          severity: critical
+          category: security
+          notify_profile: operations
+          condition_id: SSL_INVALID
+        annotations:
+          summary: "SSL {{ $labels.instance }} 证书链无效"
+          description: "黑盒探针未拿到有效证书过期时间。"
+          impact: "用户访问被浏览器拦截。"
+          action: "检查证书链, 必要时补全中间证书。"
