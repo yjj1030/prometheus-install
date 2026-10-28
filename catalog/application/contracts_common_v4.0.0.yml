@@ -6,7 +6,7 @@ groups:
     expr: (time() - ops_backup_last_success_timestamp_seconds) > on(site,environment_class,service,backup_job) ops_backup_rpo_seconds
     labels:
       severity: critical
-      category: application
+      category: backup
       condition_id: backup_rpo
       alert_type: state
     annotations:
@@ -31,7 +31,7 @@ groups:
       ops_restore_test_max_age_seconds
     labels:
       severity: warning
-      category: application
+      category: backup
       condition_id: backup_restore_test
       alert_type: state
     annotations:

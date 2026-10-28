@@ -7,7 +7,7 @@ groups:
       > 90
     labels:
       severity: warning
-      category: windows
+      category: compute
       condition_id: windows_cpu
       alert_type: state
     annotations:
@@ -32,7 +32,7 @@ groups:
       > 95
     labels:
       severity: warning
-      category: windows
+      category: memory
       condition_id: windows_memory
       alert_type: state
     annotations:
@@ -57,7 +57,7 @@ groups:
       < 0.1
     labels:
       severity: warning
-      category: windows
+      category: filesystem
       condition_id: windows_disk
       alert_type: state
     annotations:
@@ -82,7 +82,7 @@ groups:
       < 0.03
     labels:
       severity: critical
-      category: windows
+      category: filesystem
       condition_id: windows_disk
       alert_type: state
     annotations:
@@ -106,7 +106,7 @@ groups:
     expr: windows_service_state{job="windows_exporter",state="running",critical_service="true"} == 0
     labels:
       severity: critical
-      category: windows
+      category: availability
       condition_id: windows_service
       alert_type: state
     annotations:
@@ -129,7 +129,7 @@ groups:
     expr: windows_exporter_collector_success{job="windows_exporter"} == 0
     labels:
       severity: warning
-      category: windows
+      category: monitoring
       condition_id: windows_collector
       alert_type: state
     annotations:

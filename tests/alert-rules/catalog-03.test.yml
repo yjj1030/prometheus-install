@@ -1,5 +1,5 @@
 rule_files:
-- ../../catalog/database/postgresql.yml
+- ../../catalog/database/postgresql_common_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: PG replication seconds metric

@@ -1,6 +1,6 @@
 # 自定义指标契约
 
-`application/contracts.yml` 和 `slo/http.yml` 是需先实现适配的模板。`ops_*` 是本仓库定义的接口，不是任何数据库、备份软件或通知网关已经提供的指标。
+`application/contracts_common_v4.0.0.yml` 和 `slo/http_common_v4.0.0.yml` 是需先实现适配的模板。`ops_*` 是本仓库定义的接口，不是任何数据库、备份软件或通知网关已经提供的指标。
 
 | 指标 | 类型与单位 | 必需标签/含义 |
 |---|---|---|

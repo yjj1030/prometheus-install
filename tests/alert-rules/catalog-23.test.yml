@@ -1,5 +1,5 @@
 rule_files:
-- ../../catalog/common/targets.yml
+- ../../catalog/common/targets_common_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: Relabel discards all samples

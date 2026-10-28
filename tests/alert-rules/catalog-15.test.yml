@@ -1,5 +1,5 @@
 rule_files:
-- ../../catalog/kubernetes/workloads.yml
+- ../../catalog/kubernetes/workloads_common_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: Kubernetes CrashLoop

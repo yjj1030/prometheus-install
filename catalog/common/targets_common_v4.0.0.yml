@@ -1,19 +1,19 @@
 groups:
-- name: probes_availability
+- name: common_targets
   interval: 30s
   rules:
-  - alert: BlackboxExporterScrapeFailed
-    expr: up{job=~"blackbox.*"} == 0
+  - alert: ScrapeTargetDown
+    expr: up{job!~"node_exporter|blackbox.*"} == 0
     labels:
       severity: critical
-      category: probes
-      condition_id: blackbox_scrape
+      category: monitoring
+      condition_id: scrape_down
       alert_type: state
     annotations:
-      summary: 探测请求抓取失败
+      summary: 监控目标抓取失败
       description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
-      action: 查看Targets错误和Exporter状态；不能据此断言业务宕机。
-      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#probes
+      action: 查看Targets错误，区分采集失败和实际服务不可用。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#common
       resolved_summary: 告警条件已不再满足；请另行确认业务状态
       object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
         }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
@@ -21,45 +21,22 @@ groups:
         }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
         }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
       current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
-      threshold: up{job=~"blackbox.*"} == 0；持续 5m
+      threshold: up{job!~"node_exporter|blackbox.*"} == 0；持续 5m
       hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
         }}{{ else }}未提供{{ end }}'
     for: 5m
-  - alert: BlackboxEndpointFailed
-    expr: probe_success{probe_kind=~"http|tcp|dns|icmp"} == 0
-    labels:
-      severity: critical
-      category: probes
-      condition_id: blackbox_probe
-      alert_type: state
-    annotations:
-      summary: 端点探测失败
-      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
-      action: 从另一探测点复核；检查DNS、路由、握手及HTTP匹配规则。
-      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#probes
-      resolved_summary: 告警条件已不再满足；请另行确认业务状态
-      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
-        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
-        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
-        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
-        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
-      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
-      threshold: probe_success{probe_kind=~"http|tcp|dns|icmp"} == 0；持续 5m
-      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
-        }}{{ else }}未提供{{ end }}'
-    for: 5m
-  - alert: BlackboxProbeSlow
-    expr: probe_duration_seconds{probe_kind=~"http|tcp|dns"} > 3
+  - alert: ScrapeTargetFlapping
+    expr: changes(up{job!~"node_exporter|blackbox.*"}[15m]) >= 4
     labels:
       severity: warning
-      category: probes
-      condition_id: blackbox_latency
+      category: monitoring
+      condition_id: scrape_flapping
       alert_type: state
     annotations:
-      summary: 端点探测耗时偏高
+      summary: 抓取状态反复变化
       description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
-      action: 核对各phase耗时及业务响应目标，3秒仅为示例。
-      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#probes
+      action: 检查超时、重启和网络；结合失败时间核对。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#common
       resolved_summary: 告警条件已不再满足；请另行确认业务状态
       object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
         }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
@@ -67,22 +44,45 @@ groups:
         }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
         }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
       current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
-      threshold: probe_duration_seconds{probe_kind=~"http|tcp|dns"} > 3；持续 15m
+      threshold: changes(up{job!~"node_exporter|blackbox.*"}[15m]) >= 4；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: ScrapeNearTimeout
+    expr: scrape_duration_seconds / scrape_timeout_seconds > 0.8
+    labels:
+      severity: warning
+      category: monitoring
+      condition_id: scrape_timeout
+      alert_type: state
+    annotations:
+      summary: 抓取接近超时
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 定位耗时collector或目标，不先盲目提高超时。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#common
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: scrape_duration_seconds / scrape_timeout_seconds > 0.8；持续 15m
       hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
         }}{{ else }}未提供{{ end }}'
     for: 15m
-  - alert: BlackboxSuccessMetricMissing
-    expr: (up{job=~"blackbox.*"} == 1) unless on(job,instance) probe_success
+  - alert: ScrapeSampleLimitExceeded
+    expr: increase(prometheus_target_scrapes_exceeded_sample_limit_total{job="prometheus"}[10m]) > 0
     labels:
       severity: warning
-      category: probes
-      condition_id: blackbox_missing
+      category: monitoring
+      condition_id: scrape_sample_limit
       alert_type: state
     annotations:
-      summary: 抓取成功但探测结果指标缺失
+      summary: 抓取超过样本限制
       description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
-      action: 核查module、抓取路径和metric_relabel，不填零伪造健康。
-      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#probes
+      action: 核查高基数、sample_limit和目标样本量。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#common
       resolved_summary: 告警条件已不再满足；请另行确认业务状态
       object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
         }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
@@ -90,7 +90,29 @@ groups:
         }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
         }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
       current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
-      threshold: (up{job=~"blackbox.*"} == 1) unless on(job,instance) probe_success；持续 10m
+      threshold: increase(prometheus_target_scrapes_exceeded_sample_limit_total{job="prometheus"}[10m]) > 0；持续 无额外for等待
       hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
         }}{{ else }}未提供{{ end }}'
-    for: 10m
+  - alert: ScrapeMetricRelabelDropsAll
+    expr: (scrape_samples_scraped > 0) and (scrape_samples_post_metric_relabeling == 0)
+    labels:
+      severity: warning
+      category: monitoring
+      condition_id: scrape_all_dropped
+      alert_type: state
+    annotations:
+      summary: 指标重标签后样本全部丢弃
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 确认是否预期过滤；不能把up=1等同于指标完整。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#common
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (scrape_samples_scraped > 0) and (scrape_samples_post_metric_relabeling == 0)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m

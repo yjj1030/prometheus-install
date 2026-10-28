@@ -7,11 +7,11 @@ def data(path):return yaml.safe_load(path.read_text())
 def rules(path):return [r for g in data(path)['groups'] for r in g['rules']]
 def alerts(path):return [r for r in rules(path) if 'alert' in r]
 sc=ROOT/'scenarios/sk-91'
-recommended=alerts(sc/'test-recommended/node_alerts.yml');quiet=alerts(sc/'test-memory-oom-only/node_alerts.yml')
+recommended=alerts(sc/'nonprod/node_nonprod_v4.0.0.yml');quiet=alerts(sc/'nonprod-memory/node_nonprod_v4.0.0.yml')
 assert [r for r in recommended if r['labels']['category']!='memory']==[r for r in quiet if r['labels']['category']!='memory'],'Non-memory policies differ'
-assert [r['alert'] for r in quiet if r['labels']['category']=='memory']==['NodeOOMKillDetected'],'OOM-only contains another memory alert'
-assert set(r['alert'] for r in recommended if r['labels']['category']=='memory')=={'NodeOOMKillDetected','NodeMemoryUsageHighWarning','NodeMemoryUsageHighCritical','NodeSwapPressureWarning'}
-for profile in ['production','test-recommended','test-memory-oom-only']:
+assert set(r['alert'] for r in quiet if r['labels']['category']=='memory')=={'NodeOOMKillDetected','NodeMemoryExhaustedCritical'},'Reduced-noise policy must retain OOM and 100% only'
+assert set(r['alert'] for r in recommended if r['labels']['category']=='memory')=={'NodeOOMKillDetected','NodeMemoryExhaustedCritical','NodeMemoryUsageHighWarning','NodeMemoryUsageHighCritical','NodeSwapPressureWarning'}
+for profile in ['prod','nonprod','nonprod-memory']:
     all_alerts=[]
     for f in (sc/profile).glob('*.yml'):all_alerts+=alerts(f)
     for r in all_alerts:

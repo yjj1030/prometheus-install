@@ -1,6 +1,6 @@
-# production · v3.0.0
+# prod · v4.0.0
 
-部署本目录三个YAML；使用方法及限制见[上级说明](../README.md)。本表仅列当前策略，详细计算与显示字段见YAML。
+部署本目录 `node_prod_v4.0.0.yml`、`recording_prod_v4.0.0.yml`、`prometheus_prod_v4.0.0.yml` 三个文件；使用方法及限制见[上级说明](../README.md)。100%内存耗尽为独立严重告警，无额外for等待。
 
 | 告警 | 等级 | 持续时间 | 判定条件 |
 |---|---|---|---|
@@ -12,6 +12,7 @@
 | NodeCPUUsageHighWarning（nonprod/stress） | warning | 60m | 最近5分钟CPU非空闲占比 ≥95%，连续 ≥60分钟 |
 | NodeCPUUsageHighCritical（nonprod/stress） | critical | 30m | 最近5分钟CPU非空闲占比 ≥99%，连续 ≥30分钟 |
 | NodeOOMKillDetected（nonprod/stress） | critical | 无额外等待 | 最近10分钟OOM Kill计数器增量 >0；无额外for等待 |
+| NodeMemoryExhaustedCritical（nonprod/stress） | critical | 无额外等待 | MemAvailable口径内存使用率真实计算值 ≥100%；无额外for等待，不按显示四舍五入判断 |
 | NodeFilesystemUsageWarning（nonprod/stress） | warning | 2h | 文件系统使用率（df近似口径） ≥90%，连续 ≥2小时 |
 | NodeFilesystemUsageCritical（nonprod/stress） | critical | 30m | 文件系统使用率（df近似口径） ≥97%，连续 ≥30分钟 |
 | NodeFilesystemFreeSpaceCritical（nonprod/stress） | critical | 15m | 可用空间 <2GiB 且使用率 >90%，持续 ≥15分钟 |
@@ -32,6 +33,7 @@
 | NodeMemoryUsageHighCritical | critical | 10m | MemAvailable口径内存使用率 ≥98%，连续 ≥10分钟 |
 | NodeSwapPressureWarning | warning | 15m | Swap使用率 ≥60%，且最近5分钟换入换出合计 >1页/秒，连续 ≥15分钟 |
 | NodeOOMKillDetected | critical | 无额外等待 | 最近10分钟OOM Kill计数器增量 >0；无额外for等待 |
+| NodeMemoryExhaustedCritical | critical | 无额外等待 | MemAvailable口径内存使用率真实计算值 ≥100%；无额外for等待，不按显示四舍五入判断 |
 | NodeFilesystemUsageWarning | warning | 30m | 文件系统使用率（df近似口径） ≥85%，连续 ≥30分钟 |
 | NodeFilesystemUsageCritical | critical | 10m | 文件系统使用率（df近似口径） ≥95%，连续 ≥10分钟 |
 | NodeFilesystemFreeSpaceCritical | critical | 10m | 可用空间 <2GiB 且使用率 >90%，持续 ≥10分钟 |

@@ -1,4 +1,4 @@
-production:
+prod:
   environment_class: prod
   overrides:
     NodeDown:
@@ -357,6 +357,12 @@ production:
       severity: critical
       annotations:
         threshold: 连接跟踪表已用量/上限 ≥95%，连续 ≥10分钟
+    NodeMemoryExhaustedCritical:
+      expr: node:memory_usage:percent >= 100
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: MemAvailable口径内存使用率真实计算值 ≥100%；无额外for等待，不按显示四舍五入判断
 test_memory_recommended:
 - alert: NodeMemoryUsageHighWarning
   for: 30m

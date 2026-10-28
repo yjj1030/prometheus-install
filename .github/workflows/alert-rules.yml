@@ -2,6 +2,9 @@ name: Alert rules
 on:
   push:
     paths:
+      - 'VERSION'
+      - 'BASELINE.*'
+      - 'AGENTS.md'
       - 'catalog/**'
       - 'scenarios/**'
       - 'tests/alert-rules/**'
@@ -10,6 +13,9 @@ on:
       - '.github/workflows/alert-rules.yml'
   pull_request:
     paths:
+      - 'VERSION'
+      - 'BASELINE.*'
+      - 'AGENTS.md'
       - 'catalog/**'
       - 'scenarios/**'
       - 'tests/alert-rules/**'

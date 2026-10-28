@@ -1,0 +1,100 @@
+rule_files:
+- ../../scenarios/sk-91/nonprod/node_nonprod_v4.0.0.yml
+evaluation_interval: 30s
+tests:
+- name: 'default: actual 100 independent of OOM'
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 100+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 0m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: 'default: actual 99.9999 independent of OOM'
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 99.9999+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 0m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: 'stress: actual 100 independent of OOM'
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="stress"}
+    values: 100+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 0m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: 'stress: actual 99.9999 independent of OOM'
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="stress"}
+    values: 99.9999+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 0m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Full-memory delayed resolution for two minutes
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 100+0x3 99+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 1m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 0

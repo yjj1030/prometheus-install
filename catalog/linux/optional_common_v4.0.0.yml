@@ -1,0 +1,146 @@
+groups:
+- name: linux_optional
+  interval: 30s
+  rules:
+  - alert: NodeClockOffset
+    expr: abs(node_timex_offset_seconds{job="node_exporter"}) > 0.5
+    labels:
+      severity: warning
+      category: time
+      condition_id: node_clock
+      alert_type: state
+    annotations:
+      summary: 主机时间偏差偏大
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查chrony/NTP、虚拟化时钟和认证失败时间。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: abs(node_timex_offset_seconds{job="node_exporter"}) > 0.5；持续 10m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 10m
+  - alert: NodeClockNotSynchronising
+    expr: min_over_time(node_timex_sync_status{job="node_exporter"}[5m]) == 0 and node_timex_maxerror_seconds{job="node_exporter"}
+      >= 16
+    labels:
+      severity: warning
+      category: time
+      condition_id: node_clock_sync
+      alert_type: state
+    annotations:
+      summary: 主机时钟未同步
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查时间源连通性、服务状态及偏差。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: min_over_time(node_timex_sync_status{job="node_exporter"}[5m]) == 0 and node_timex_maxerror_seconds{job="node_exporter"}
+        >= 16；持续 10m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 10m
+  - alert: NodeRAIDDegraded
+    expr: node_md_disks_required{job="node_exporter"} - ignoring(state) node_md_disks{job="node_exporter",state="active"}
+      > 0
+    labels:
+      severity: critical
+      category: storage
+      condition_id: node_raid
+      alert_type: state
+    annotations:
+      summary: 软件RAID降级
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对阵列状态、备盘和磁盘错误；按存储流程处理。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: node_md_disks_required{job="node_exporter"} - ignoring(state) node_md_disks{job="node_exporter",state="active"}
+        > 0；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: NodeSystemdServiceFailed
+    expr: node_systemd_unit_state{job="node_exporter",state="failed",critical_service="true"} == 1
+    labels:
+      severity: critical
+      category: availability
+      condition_id: node_systemd
+      alert_type: state
+    annotations:
+      summary: 受管systemd服务失败
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 只对纳入职责的unit启用；检查日志及服务健康。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: node_systemd_unit_state{job="node_exporter",state="failed",critical_service="true"} == 1；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: NodeMemoryPressureStall
+    expr: rate(node_pressure_memory_stalled_seconds_total{job="node_exporter"}[5m]) > 0.1
+    labels:
+      severity: warning
+      category: memory
+      condition_id: node_memory_psi
+      alert_type: state
+    annotations:
+      summary: 内存完整阻塞时间持续偏高
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 结合MemAvailable、major fault、进程及业务延迟排查。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: rate(node_pressure_memory_stalled_seconds_total{job="node_exporter"}[5m]) > 0.1；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: NodeTextfileCollectorError
+    expr: node_textfile_scrape_error{job="node_exporter"} == 1
+    labels:
+      severity: warning
+      category: monitoring
+      condition_id: node_textfile
+      alert_type: state
+    annotations:
+      summary: 自定义文本指标读取失败
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查文件格式、原子替换及权限。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#linux
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: node_textfile_scrape_error{job="node_exporter"} == 1；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m

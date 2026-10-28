@@ -1,6 +1,6 @@
-# test-recommended · v3.0.0
+# nonprod · v4.0.0
 
-部署本目录三个YAML；使用方法及限制见[上级说明](../README.md)。本表仅列当前策略，详细计算与显示字段见YAML。
+部署本目录 `node_nonprod_v4.0.0.yml`、`recording_nonprod_v4.0.0.yml`、`prometheus_nonprod_v4.0.0.yml` 三个文件；使用方法及限制见[上级说明](../README.md)。100%内存耗尽为独立严重告警，无额外for等待。
 
 | 告警 | 等级 | 持续时间 | 判定条件 |
 |---|---|---|---|
@@ -12,6 +12,7 @@
 | NodeCPUUsageHighWarning | warning | 60m | 最近5分钟CPU非空闲占比 ≥95%，连续 ≥60分钟 |
 | NodeCPUUsageHighCritical | critical | 30m | 最近5分钟CPU非空闲占比 ≥99%，连续 ≥30分钟 |
 | NodeOOMKillDetected | critical | 无额外等待 | 最近10分钟OOM Kill计数器增量 >0；无额外for等待 |
+| NodeMemoryExhaustedCritical | critical | 无额外等待 | MemAvailable口径内存使用率真实计算值 ≥100%；无额外for等待，不按显示四舍五入判断 |
 | NodeMemoryUsageHighWarning | warning | 30m | MemAvailable口径内存使用率 ≥97%，连续 ≥30分钟 |
 | NodeMemoryUsageHighCritical | critical | 15m | MemAvailable口径内存使用率 ≥99%，连续 ≥15分钟 |
 | NodeSwapPressureWarning | warning | 30m | Swap使用率 ≥60%，且最近5分钟换入换出合计 >1页/秒，连续 ≥30分钟 |

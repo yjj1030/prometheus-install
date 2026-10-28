@@ -39,7 +39,7 @@
 - Release-candidate hardening after RC2 self-audit.
 - Removed residual Grafana provisioning path outside the instance root.
 - Hardened readiness test harness with per-scenario retry and runner-file timeout execution.
-- Preserved production installer runtime as seven standalone self-contained scripts.
+- Preserved prod installer runtime as seven standalone self-contained scripts.
 
 ## v6r4-RC2
 
@@ -51,9 +51,22 @@
 ## Alert rules v3.0.0 · 2026-10-28
 
 - Add an optional general catalog (24 alert modules, 146 alerts and 45 Linux recording rules), source references, metric contracts and runbooks.
-- Add the maintained institution scenario under `scenarios/sk-91/`, with production, recommended test and test OOM-only profiles.
+- Add the maintained institution scenario under `scenarios/sk-91/`, with prod, recommended test and test OOM-only profiles.
 - OOM-only suppresses memory utilization/swap thresholds including 100%, while retaining all other test policy categories.
-- Preserve mixed nonprod/stress target support in production; keep production thresholds in the scenario policy.
+- Preserve mixed nonprod/stress target support in prod; keep prod thresholds in the scenario policy.
 - Keep hostname fallback in annotations and remove dynamic historical nodename enrichment from NodeDown identity.
 - Add deterministic profile generation, rule tests, routing tests, isolated Alertmanager inhibition tests and CI. Installation scripts and existing snapshots are unchanged.
 - Live deployment, notification gateway rendering and actual delivery remain unverified; see scenario VALIDATION.md.
+
+## Alert rules v3.0.1 · 2026-10-28
+
+- Supersede the earlier OOM-only decision: all prod/nonprod profiles now retain a dedicated actual-100% critical memory alert, without an additional for delay.
+- Reduced-noise test memory policy retains OOM and 100% only; other categories are unchanged.
+- Add boundary tests and scoped memory notification inhibition; update maintained context and policy documentation.
+
+## v4.0.0 · 2026-10-28
+
+- 按用户要求统一模板环境与版本标识；部署入口简化为prod、nonprod、nonprod-memory；旧路径由Git历史保留。
+- 固化VERSION、BASELINE.md、SHA256清单及CI检查，规范后续主/次/修订版本升级。
+- category按信号分类，不按操作系统或Exporter目录分类；severity按响应紧迫性管理，保留现有机构分级阈值。
+- 三套版本均保留OOM及真实100%内存严重告警。

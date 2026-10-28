@@ -1,5 +1,5 @@
 rule_files:
-- ../../catalog/linux/optional.yml
+- ../../catalog/linux/optional_common_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: Linux clock offset

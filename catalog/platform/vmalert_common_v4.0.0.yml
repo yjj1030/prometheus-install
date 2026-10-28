@@ -6,7 +6,7 @@ groups:
     expr: increase(vmalert_alerting_rules_errors_total{job="vmalert"}[5m]) > 0
     labels:
       severity: critical
-      category: platform
+      category: monitoring
       condition_id: vmalert_eval
       alert_type: state
     annotations:
@@ -29,7 +29,7 @@ groups:
     expr: increase(vmalert_alerts_send_errors_total{job="vmalert"}[5m]) > 0
     labels:
       severity: critical
-      category: platform
+      category: monitoring
       condition_id: vmalert_delivery
       alert_type: state
     annotations:
@@ -52,7 +52,7 @@ groups:
     expr: vmalert_alerting_rules_last_evaluation_series_fetched{job="vmalert"} == 0
     labels:
       severity: warning
-      category: platform
+      category: monitoring
       condition_id: vmalert_coverage
       alert_type: state
     annotations:

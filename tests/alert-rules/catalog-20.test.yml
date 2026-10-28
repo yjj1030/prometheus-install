@@ -1,5 +1,5 @@
 rule_files:
-- ../../catalog/platform/vmalert.yml
+- ../../catalog/platform/vmalert_common_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: VMAlert no input diagnosis

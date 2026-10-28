@@ -3,9 +3,22 @@
 ## v3.0.0 · 2026-10-28
 
 - 首次将后续规则维护迁入本Git仓库，区分通用catalog和本场景。
-- 提供production、test-recommended、test-memory-oom-only三套；测试非内存部分一致。
+- 提供prod、nonprod、nonprod-memory三套；测试非内存部分一致。
 - 澄清并落实OOM-only：取消测试版100%内存告警；保留其他类别。
 - 保留生产原阈值及nonprod/stress混合目标兼容。
 - NodeDown移除历史nodename label连接，主机名保留annotation回退。
 - 增加指标/规则/路由测试与抑制集成验证；验证范围见VALIDATION.md。
 - 未修改安装器，未部署至现场，hostname线上问题仍待实际payload核实。
+
+## v3.0.1 · 2026-10-28
+
+- 按用户最新确认，所有生产/非生产目标均增加独立100%内存严重告警，无额外for等待，延迟解除2分钟。
+- 测试内存降噪版改为OOM+真实100%，其他内存阈值继续停用；其他类别不变。旧目录名保留兼容。
+- 补充边界测试、同对象内存通知抑制，更新维护约定；覆盖v3.0.0的仅OOM策略。
+
+## v4.0.0 · 2026-10-28
+
+- 按用户要求统一模板环境与版本标识；部署入口简化为prod、nonprod、nonprod-memory；旧路径由Git历史保留。
+- 固化VERSION、BASELINE.md、SHA256清单及CI检查，规范后续主/次/修订版本升级。
+- category按信号分类，不按操作系统或Exporter目录分类；severity按响应紧迫性管理，保留现有机构分级阈值。
+- 三套版本均保留OOM及真实100%内存严重告警。

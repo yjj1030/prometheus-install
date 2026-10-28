@@ -1,5 +1,5 @@
 rule_files:
-- ../../scenarios/sk-91/test-memory-oom-only/node_alerts.yml
+- ../../scenarios/sk-91/nonprod-memory/node_nonprod_v4.0.0.yml
 evaluation_interval: 30s
 tests:
 - name: High memory below100 evaluated according to chosen policy
@@ -8,32 +8,42 @@ tests:
   - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 99.5+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"})
+      or vector(0)
     eval_time: 15m
     exp_samples:
     - labels: '{}'
       value: 0
-  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"})
+      or vector(0)
     eval_time: 30m
     exp_samples:
     - labels: '{}'
       value: 0
-- name: Actual100 still silent in OOM-only
+- name: Full memory has a dedicated critical alert; ordinary thresholds unchanged
   interval: 30s
   input_series:
   - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 100+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"})
+      or vector(0)
     eval_time: 60m
     exp_samples:
     - labels: '{}'
       value: 0
-  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"})
+      or vector(0)
     eval_time: 60m
     exp_samples:
     - labels: '{}'
       value: 0
+  - expr: count(ALERTS{alertname="NodeMemoryExhaustedCritical",alertstate="firing"})
+      or vector(0)
+    eval_time: 0m
+    exp_samples:
+    - labels: '{}'
+      value: 1
 - name: OOM event fires without extra for and expires with event window
   interval: 30s
   input_series:
@@ -78,12 +88,14 @@ tests:
   - series: node:cpu_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 100+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeCPUUsageHighCritical",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeCPUUsageHighCritical",alertstate="firing"})
+      or vector(0)
     eval_time: 30m
     exp_samples:
     - labels: '{}'
       value: 1
-  - expr: count(ALERTS{alertname="NodeCPUUsageHighWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeCPUUsageHighWarning",alertstate="firing"}) or
+      vector(0)
     eval_time: 60m
     exp_samples:
     - labels: '{}'
@@ -94,12 +106,14 @@ tests:
   - series: node:filesystem_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default",device="/dev/vda1",fstype="ext4",mountpoint="/"}
     values: 99+0x260
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeFilesystemUsageCritical",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeFilesystemUsageCritical",alertstate="firing"})
+      or vector(0)
     eval_time: 30m
     exp_samples:
     - labels: '{}'
       value: 1
-  - expr: count(ALERTS{alertname="NodeFilesystemUsageWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeFilesystemUsageWarning",alertstate="firing"})
+      or vector(0)
     eval_time: 120m
     exp_samples:
     - labels: '{}'
@@ -128,7 +142,8 @@ tests:
   - series: node:swap_activity:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 0+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeSwapPressureWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeSwapPressureWarning",alertstate="firing"}) or
+      vector(0)
     eval_time: 60m
     exp_samples:
     - labels: '{}'
@@ -141,12 +156,13 @@ tests:
   - series: node:swap_activity:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 2+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeSwapPressureWarning",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeSwapPressureWarning",alertstate="firing"}) or
+      vector(0)
     eval_time: 30m
     exp_samples:
     - labels: '{}'
       value: 0
-- name: Test policy does not import production TCP thresholds
+- name: Test policy does not import prod TCP thresholds
   interval: 30s
   input_series:
   - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
@@ -154,7 +170,8 @@ tests:
   - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
     values: 1000+0x140
   promql_expr_test:
-  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"})
+      or vector(0)
     eval_time: 60m
     exp_samples:
     - labels: '{}'

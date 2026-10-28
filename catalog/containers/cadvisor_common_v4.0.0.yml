@@ -8,7 +8,7 @@ groups:
       < 1152921504606846976)
     labels:
       severity: warning
-      category: containers
+      category: container
       condition_id: container_memory
       alert_type: state
     annotations:
@@ -34,7 +34,7 @@ groups:
       > 0.25) and (rate(container_cpu_cfs_periods_total{name!="",image!=""}[5m]) > 0)
     labels:
       severity: warning
-      category: containers
+      category: container
       condition_id: container_throttle
       alert_type: state
     annotations:
@@ -58,7 +58,7 @@ groups:
     expr: increase(container_oom_events_total{name!="",image!=""}[10m]) > 0
     labels:
       severity: critical
-      category: containers
+      category: container
       condition_id: container_oom
       alert_type: state
     annotations:

@@ -7,7 +7,7 @@ import yaml
 ROOT=Path(__file__).resolve().parents[1]
 def main():
     p=argparse.ArgumentParser();p.add_argument('--alertmanager',default=os.environ.get('ALERTMANAGER','alertmanager'));a=p.parse_args()
-    config=yaml.safe_load((ROOT/'scenarios/sk-91/alertmanager.example.yml').read_text())
+    config=yaml.safe_load((ROOT/'scenarios/sk-91/alertmanager_common_v4.0.0.yml').read_text())
     config['route']={'receiver':'local-only','group_by':['alertname'],'group_wait':'1h'}
     config['receivers']=[{'name':'local-only'}]
     with tempfile.TemporaryDirectory() as tmp:
@@ -40,6 +40,9 @@ def main():
                     ('HostDown',{'condition_id':'node_down','severity':'critical','instance':'host-c:9100','category':'availability','alert_type':'state'},False),
                     ('HostResource',{'condition_id':'memory','instance':'host-c:9100','category':'memory'},True),
                     ('HostOOM',{'condition_id':'oom','instance':'host-c:9100','category':'memory','severity':'critical','alert_type':'event'},False),
+                    ('FullMemory',{'condition_id':'node_memory_exhausted','instance':'host-d:9100','category':'memory','severity':'critical'},False),
+                    ('HighMemory',{'condition_id':'node_memory_usage','instance':'host-d:9100','category':'memory','severity':'critical'},True),
+                    ('FullMemoryOOM',{'condition_id':'node_oom_kill','instance':'host-d:9100','category':'memory','severity':'critical','alert_type':'event'},False),
                 ]
                 now=datetime.datetime.now(datetime.timezone.utc)
                 payload=[{'labels':dict(base,alertname=n,**changes),'startsAt':(now-datetime.timedelta(minutes=1)).isoformat(),'endsAt':(now+datetime.timedelta(hours=1)).isoformat(),'annotations':{'summary':'Local inhibition test'}} for n,changes,_ in specs]

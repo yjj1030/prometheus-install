@@ -6,7 +6,7 @@ groups:
     expr: vector(1)
     labels:
       severity: none
-      category: watchdog
+      category: monitoring
       condition_id: watchdog
       alert_type: state
     annotations:
