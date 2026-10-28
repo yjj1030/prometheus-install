@@ -5,13 +5,13 @@ import argparse,hashlib,json,re,subprocess
 import yaml
 R=Path(__file__).resolve().parents[1]
 CATEGORIES=set('availability compute memory filesystem storage network system_limit time certificate monitoring database messaging container kubernetes application backup slo'.split())
-ROOT_FILES=['VERSION','BASELINE.md','AGENTS.md','README.md','CHANGELOG.md','.github/workflows/alert-rules.yml']
+ROOT_FILES=['VERSION','BASELINE.md','DEPLOY.md','AGENTS.md','README.md','CHANGELOG.md','.github/workflows/alert-rules.yml']
 TOOLS=['build_alert_rules.py','check_alert_contracts.py','validate_alert_rules.sh','check_alert_baseline.py']
 def files():
     paths=[R/p for p in ROOT_FILES]+[R/'tools'/p for p in TOOLS]
     for folder in ['catalog','scenarios/sk-91','tests/alert-rules']:
         paths += [p for p in (R/folder).rglob('*') if p.is_file() and p.suffix in {'.md','.yml','.json'}]
-    paths += [R/'tests/alertmanager_integration.py']
+    paths += [R/'tests/alertmanager_integration.py',R/'tests/deploy_docs_test.py']
     return sorted(set(paths))
 def manifest():
     v=(R/'VERSION').read_text().strip();assert re.fullmatch(r'\d+\.\d+\.\d+',v)

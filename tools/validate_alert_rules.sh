@@ -7,6 +7,7 @@ alertmanager_bin="${ALERTMANAGER:-alertmanager}"
 python3 tools/build_alert_rules.py --check
 python3 tools/check_alert_contracts.py
 python3 tools/check_alert_baseline.py
+python3 tests/deploy_docs_test.py --promtool="${promtool_bin}"
 mapfile -t catalog_files < <(find catalog -name '*.yml' -type f | sort)
 "${promtool_bin}" check rules "${catalog_files[@]}"
 for profile in prod nonprod nonprod-memory; do

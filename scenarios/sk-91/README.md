@@ -14,13 +14,15 @@ OOM表达式为 `increase(node_vmstat_oom_kill[10m]) > 0`，critical，无额外
 
 ## 使用
 
-每个版本只部署该目录内 带环境和版本号的 `recording_*`、`node_*`、`prometheus_*` 三个文件。先在规则目录外备份旧文件，移走旧的同职责YAML，再复制选中版本。不要把三套版本、catalog或历史文件一起复制进 `rules/*.yml`，也不要把备份命名为同目录下的 `.yml`。
+**完整操作见[部署说明](../../DEPLOY.md)**，按顺序执行：
 
-证书监控按需额外部署 [TLS规则](../../catalog/probes/tls_common_v4.0.0.yml)。[证书有效期策略](../../catalog/probes/certificate_policy_common_v4.0.0.yml) 是独立可选检查，默认不加载，不表示超过某天数即违规。证书info默认仅记录，不建议在群里反复通知。已启用该可选项的现场应在清点后决定是否继续。
+1. 在上表选择一套三个文件，TLS按需另加；不复制整个catalog或policies。
+2. 核对实际Prometheus主配置的rule_files及运行实例；不是按当前shell所在目录决定目的地。
+3. 加载目录外暂存校验，备份并移走同职责旧文件，再复制新文件。
+4. 检查实际主配置，成功后reload；核对新文件、评价状态、目标覆盖和真实通知。
+5. 失败按部署说明的精确清单回退；不要叠加旧、新版本。
 
-部署前运行与现场版本配套的 `promtool check rules <规则文件>` 和 `promtool check config <实际主配置>`，再走既有受控reload流程。reload后查看 `/rules` 的lastError/health，核对 `/api/v1/alerts`，并实测通知和恢复。复制文件不会自动使规则生效。
-
-Alertmanager示例见 [alertmanager_common_v4.0.0.yml](alertmanager_common_v4.0.0.yml)；只提供路由/抑制起点，接收地址是无效示例地址，不直接替换现场配置。
+Alertmanager的[共用示例](alertmanager_common_v4.0.0.yml)单独合并到现有Alertmanager配置，其示例地址不可使用，不放进Prometheus规则目录。部署说明同时列出证书规则可选项、旧文件对应关系和回退命令。
 
 ## 修改入口
 

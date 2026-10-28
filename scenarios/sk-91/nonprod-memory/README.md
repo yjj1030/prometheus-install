@@ -1,5 +1,7 @@
 # nonprod-memory · v4.0.0
 
+**如何部署：[统一部署说明](../../../DEPLOY.md)**。本目录只部署三个YAML；先备份替换旧规则，检查通过后reload和验收。
+
 部署本目录 `node_nonprod_v4.0.0.yml`、`recording_nonprod_v4.0.0.yml`、`prometheus_nonprod_v4.0.0.yml` 三个文件；使用方法及限制见[上级说明](../README.md)。100%内存耗尽为独立严重告警，无额外for等待。
 
 | 告警 | 等级 | 持续时间 | 判定条件 |

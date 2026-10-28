@@ -1,6 +1,20 @@
 # Prometheus Monitoring Installers
 
-Current baseline: **v6r4-RC7** — cross-distro first-install regression release candidate.
+## 已有Prometheus：先看部署说明
+
+**更新告警规则直接按[DEPLOY.md](DEPLOY.md)操作。** 文档包含选版本、复制文件、替换旧规则、校验、重载、验收和回退。已有实例更新规则无需重跑安装器。
+
+| 你要做什么 | 入口 |
+|---|---|
+| 生产规则 | [prod](scenarios/sk-91/prod/) |
+| 建议非生产规则 | [nonprod](scenarios/sk-91/nonprod/) |
+| 非生产内存降噪，保留OOM和100% | [nonprod-memory](scenarios/sk-91/nonprod-memory/) |
+| 文件用途与完整操作 | [部署说明](DEPLOY.md) |
+| 命名、分类分级和版本维护 | [维护基线](BASELINE.md) |
+
+每个实例只选一套三个文件；TLS按需另加。Alertmanager示例不是Prometheus规则文件。安装器版本与规则VERSION分别管理。
+
+Current installer baseline: **v6r4-RC7** — cross-distro first-install regression release candidate.
 
 This repository contains prod-oriented Linux installers for seven monitoring components, active source/tests, and archived historical delivery material.
 
@@ -40,7 +54,7 @@ RC7 is **not GA**. Freeze Candidate requires targeted UAT on Debian 12, openSUSE
 告警规则从2026-10-28起单独在本仓库维护，与安装器RC版本分开管理：
 
 - [通用场景库](catalog/README.md)：按依赖选用的24个模块、147条告警、45条Linux记录规则；含来源、指标契约和运行手册。
-- [本机构场景](scenarios/sk-91/README.md)：生产版、建议测试版、测试内存OOM降噪版三套互斥部署选择。
+- [本机构场景](scenarios/sk-91/README.md)：生产版、建议测试版、非生产内存降噪版（OOM＋100%）三套互斥部署选择。
 - [场景约定](scenarios/sk-91/CONTEXT.md)：后续确认的策略和现场证据统一记录于此。
 - [验证范围](scenarios/sk-91/VALIDATION.md)：规则测试、路由与抑制测试，以及尚未完成的现场验收。
 

@@ -29,7 +29,7 @@ for f in (ROOT/'tests/alert-rules').glob('*.test.yml'):
             for name in re.findall(r'alertname="([^"]+)"',check['expr']):
                 # Explicit negative tests for absent memory/TCP alerts are intentional.
                 assert name in known or name in {'NodeMemoryUsageHighCritical','NodeMemoryUsageHighWarning','NodeSwapPressureWarning','NodeTCPRetransmissionCritical'},f'Unknown test alert {name} in {f}'
-for f in list((ROOT/'catalog').rglob('*.md'))+list(sc.rglob('*.md')):
+for f in [ROOT/'DEPLOY.md']+list((ROOT/'catalog').rglob('*.md'))+list(sc.rglob('*.md')):
     for link in re.findall(r'\]\(([^)]+)\)',f.read_text()):
         if '://' in link or link.startswith('#'):continue
         target=link.split('#')[0]
