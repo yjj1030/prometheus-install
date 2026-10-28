@@ -1,0 +1,30 @@
+rule_files:
+- ../../catalog/probes/tls.yml
+evaluation_interval: 30s
+tests:
+- name: Certificate7days severity overlap needs inhibition
+  interval: 30s
+  input_series:
+  - series: probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://service.example.invalid"}
+    values: 604800+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="SSLCertificateExpiringInfo",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="SSLCertificateExpiringWarning",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="SSLCertificateExpiringCritical",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="SSLCertificateExpiringEmergency",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 0

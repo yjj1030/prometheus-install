@@ -1,0 +1,28 @@
+rule_files:
+- ../../catalog/probes/certificate_policy.yml
+evaluation_interval: 30s
+tests:
+- name: Validity policy is explicitly internet-scoped
+  interval: 30s
+  input_series:
+  - series: probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://internal.example.invalid",target_scope="internal"}
+    values: 31536000+0x80
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="SSLCertificateValidityAbnormal",alertstate="firing"})
+      or vector(0)
+    eval_time: 30m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Validity policy positive scoped observation
+  interval: 30s
+  input_series:
+  - series: probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://internet.example.invalid",target_scope="internet"}
+    values: 31536000+0x80
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="SSLCertificateValidityAbnormal",alertstate="firing"})
+      or vector(0)
+    eval_time: 30m
+    exp_samples:
+    - labels: '{}'
+      value: 1

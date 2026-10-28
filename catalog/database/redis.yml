@@ -1,0 +1,121 @@
+groups:
+- name: database_redis
+  interval: 30s
+  rules:
+  - alert: RedisUnavailable
+    expr: redis_up{job="redis"} == 0
+    labels:
+      severity: critical
+      category: database
+      condition_id: redis_up
+      alert_type: state
+    annotations:
+      summary: Redis连接检查失败
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查Redis状态、认证、网络及连接耗尽。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#database
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: redis_up{job="redis"} == 0；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: RedisMemoryNearLimit
+    expr: (redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9) and (redis_memory_max_bytes{job="redis"}
+      > 0)
+    labels:
+      severity: warning
+      category: database
+      condition_id: redis_memory
+      alert_type: state
+    annotations:
+      summary: Redis接近maxmemory限制
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查淘汰策略、key增长和可用容量。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#database
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9) and (redis_memory_max_bytes{job="redis"}
+        > 0)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: RedisEvictions
+    expr: rate(redis_evicted_keys_total{job="redis"}[5m]) > 1
+    labels:
+      severity: warning
+      category: database
+      condition_id: redis_evictions
+      alert_type: state
+    annotations:
+      summary: Redis持续淘汰key
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 确认是否预期缓存淘汰；不能直接认定业务数据丢失。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#database
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: rate(redis_evicted_keys_total{job="redis"}[5m]) > 1；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: RedisClusterUnhealthy
+    expr: redis_cluster_state{job="redis"} == 0
+    labels:
+      severity: critical
+      category: database
+      condition_id: redis_cluster
+      alert_type: state
+    annotations:
+      summary: Redis Cluster状态异常
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查slots、主节点、故障转移和节点互联。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#database
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: redis_cluster_state{job="redis"} == 0；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: RedisRejectedConnections
+    expr: increase(redis_rejected_connections_total{job="redis"}[10m]) > 0
+    labels:
+      severity: warning
+      category: database
+      condition_id: redis_connections
+      alert_type: state
+    annotations:
+      summary: Redis拒绝连接
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查maxclients、连接池及文件描述符。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#database
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: increase(redis_rejected_connections_total{job="redis"}[10m]) > 0；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m

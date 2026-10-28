@@ -1,0 +1,150 @@
+groups:
+- name: windows_host
+  interval: 30s
+  rules:
+  - alert: WindowsCPUHigh
+    expr: 100 * (1 - avg without(core,mode) (rate(windows_cpu_time_total{job="windows_exporter",mode="idle"}[5m])))
+      > 90
+    labels:
+      severity: warning
+      category: windows
+      condition_id: windows_cpu
+      alert_type: state
+    annotations:
+      summary: Windows CPU持续繁忙
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 定位进程及CPU等待，结合应用延迟。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: 100 * (1 - avg without(core,mode) (rate(windows_cpu_time_total{job="windows_exporter",mode="idle"}[5m])))
+        > 90；持续 30m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 30m
+  - alert: WindowsMemoryLow
+    expr: 100 * (1 - windows_memory_available_bytes{job="windows_exporter"} / windows_memory_physical_total_bytes{job="windows_exporter"})
+      > 95
+    labels:
+      severity: warning
+      category: windows
+      condition_id: windows_memory
+      alert_type: state
+    annotations:
+      summary: Windows可用内存偏低
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对提交量、分页和进程增长。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: 100 * (1 - windows_memory_available_bytes{job="windows_exporter"} / windows_memory_physical_total_bytes{job="windows_exporter"})
+        > 95；持续 20m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 20m
+  - alert: WindowsDiskLow
+    expr: windows_logical_disk_free_bytes{job="windows_exporter",volume!="HarddiskVolume1"} / windows_logical_disk_size_bytes{job="windows_exporter",volume!="HarddiskVolume1"}
+      < 0.1
+    labels:
+      severity: warning
+      category: windows
+      condition_id: windows_disk
+      alert_type: state
+    annotations:
+      summary: Windows卷剩余空间不足10%
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 按volume定位清理或扩容，排除系统保留卷。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: windows_logical_disk_free_bytes{job="windows_exporter",volume!="HarddiskVolume1"} / windows_logical_disk_size_bytes{job="windows_exporter",volume!="HarddiskVolume1"}
+        < 0.1；持续 30m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 30m
+  - alert: WindowsDiskCritical
+    expr: windows_logical_disk_free_bytes{job="windows_exporter"} / windows_logical_disk_size_bytes{job="windows_exporter"}
+      < 0.03
+    labels:
+      severity: critical
+      category: windows
+      condition_id: windows_disk
+      alert_type: state
+    annotations:
+      summary: Windows卷剩余空间不足3%
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核实可用字节和写入增长，按预案扩容。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: windows_logical_disk_free_bytes{job="windows_exporter"} / windows_logical_disk_size_bytes{job="windows_exporter"}
+        < 0.03；持续 10m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 10m
+  - alert: WindowsServiceStopped
+    expr: windows_service_state{job="windows_exporter",state="running",critical_service="true"} == 0
+    labels:
+      severity: critical
+      category: windows
+      condition_id: windows_service
+      alert_type: state
+    annotations:
+      summary: 受管Windows服务未运行
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 服务collector必须只包括受管服务；检查服务事件及依赖。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: windows_service_state{job="windows_exporter",state="running",critical_service="true"} == 0；持续 5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: WindowsCollectorFailed
+    expr: windows_exporter_collector_success{job="windows_exporter"} == 0
+    labels:
+      severity: warning
+      category: windows
+      condition_id: windows_collector
+      alert_type: state
+    annotations:
+      summary: Windows采集器失败
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查collector权限、WMI和事件日志。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#windows
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: windows_exporter_collector_success{job="windows_exporter"} == 0；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m

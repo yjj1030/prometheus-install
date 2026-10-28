@@ -1,0 +1,78 @@
+groups:
+- name: containers_cadvisor
+  interval: 30s
+  rules:
+  - alert: ContainerMemoryNearLimit
+    expr: (container_memory_working_set_bytes{name!="",image!=""} / container_spec_memory_limit_bytes{name!="",image!=""}
+      > 0.9) and (container_spec_memory_limit_bytes{name!="",image!=""} > 0) and (container_spec_memory_limit_bytes{name!="",image!=""}
+      < 1152921504606846976)
+    labels:
+      severity: warning
+      category: containers
+      condition_id: container_memory
+      alert_type: state
+    annotations:
+      summary: 容器内存接近限制
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查工作集、限制和容器重启；不能当成宿主机OOM。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#containers
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (container_memory_working_set_bytes{name!="",image!=""} / container_spec_memory_limit_bytes{name!="",image!=""}
+        > 0.9) and (container_spec_memory_limit_bytes{name!="",image!=""} > 0) and (container_spec_memory_limit_bytes{name!="",image!=""}
+        < 1152921504606846976)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: ContainerCPUThrottled
+    expr: (rate(container_cpu_cfs_throttled_periods_total{name!="",image!=""}[5m]) / rate(container_cpu_cfs_periods_total{name!="",image!=""}[5m])
+      > 0.25) and (rate(container_cpu_cfs_periods_total{name!="",image!=""}[5m]) > 0)
+    labels:
+      severity: warning
+      category: containers
+      condition_id: container_throttle
+      alert_type: state
+    annotations:
+      summary: 容器CPU节流周期比例偏高
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 结合业务延迟及CPU限制，周期比例不等于损失CPU时间。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#containers
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (rate(container_cpu_cfs_throttled_periods_total{name!="",image!=""}[5m]) / rate(container_cpu_cfs_periods_total{name!="",image!=""}[5m])
+        > 0.25) and (rate(container_cpu_cfs_periods_total{name!="",image!=""}[5m]) > 0)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: ContainerOOMEvents
+    expr: increase(container_oom_events_total{name!="",image!=""}[10m]) > 0
+    labels:
+      severity: critical
+      category: containers
+      condition_id: container_oom
+      alert_type: state
+    annotations:
+      summary: 容器发生OOM事件
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查容器内存限制、日志和重启前后影响。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#containers
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: increase(container_oom_events_total{name!="",image!=""}[10m]) > 0；持续 无额外for等待
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'

@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/application/contracts.yml
+evaluation_interval: 30s
+tests:
+- name: Missing independently expected metric
+  interval: 30s
+  input_series:
+  - series: ops_expected_metric_info{service="oa",metric_id="backup"}
+    values: 1+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="ContractMetricMissing",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1

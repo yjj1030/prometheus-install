@@ -1,0 +1,376 @@
+production:
+  environment_class: prod
+  overrides:
+    NodeDown:
+      expr: up{job="node_exporter"} == 0
+      for: 2m
+      severity: critical
+      annotations:
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+    NodeExporterFlapping:
+      expr: changes(up{job="node_exporter"}[15m]) >= 4
+      for: 5m
+      severity: warning
+      annotations:
+        threshold: 15分钟内状态变化 ≥4次，并持续5分钟
+    NodeExporterCoreCollectorFailed:
+      expr: "count without (collector) (\n  node_scrape_collector_success{\n    job=\"node_exporter\",\n    \n \
+        \   collector=~\"cpu|diskstats|filesystem|filefd|loadavg|meminfo|netdev|netstat|stat|uname|vmstat\"\n  }\
+        \ == 0\n) > 0\n"
+      for: 15m
+      severity: warning
+      annotations:
+        threshold: 关键 Collector 失败持续 ≥15分钟
+    NodeExporterCoreCollectorMissing:
+      expr: '(
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "cpu", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "diskstats", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "filesystem", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "filefd", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "loadavg", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "meminfo", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "netdev", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "netstat", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "stat", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "uname", "instance", ".*")
+
+        or
+
+        label_replace(up{job="node_exporter"} == 1, "collector", "vmstat", "instance", ".*")
+
+        )
+
+        unless on (instance, job, collector)
+
+        node_scrape_collector_success{job="node_exporter"}
+
+        '
+      for: 15m
+      severity: warning
+      annotations:
+        threshold: up=1但必需采集器指标缺失，连续 ≥15分钟
+    NodeTargetDisappeared:
+      expr: '(node:monitor_target:last_seen_timestamp_seconds{alert_policy!~"nonprod|stress"} > 0)
+
+        unless on (instance, job) up{job="node_exporter"}
+
+        '
+      for: 10m
+      severity: warning
+      annotations:
+        threshold: 过去24小时出现过的目标当前无up时序，连续 ≥10分钟
+    NodeCPUUsageHighWarning:
+      expr: node:cpu_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+      for: 20m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟CPU非空闲占比 ≥85%，连续 ≥20分钟
+    NodeCPUUsageHighCritical:
+      expr: node:cpu_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟CPU非空闲占比 ≥95%，连续 ≥10分钟
+    NodeCPUIOWaitHighWarning:
+      expr: node:cpu_iowait:percent{alert_policy!~"nonprod|stress"} >= 25
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟CPU iowait占比 ≥25%，连续 ≥15分钟
+    NodeCPUIOWaitHighCritical:
+      expr: node:cpu_iowait:percent{alert_policy!~"nonprod|stress"} >= 40
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟CPU iowait占比 ≥40%，连续 ≥10分钟
+    NodeCPUStealHighWarning:
+      expr: node:cpu_steal:percent{alert_policy!~"nonprod|stress"} >= 10
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟CPU steal占比 ≥10%，连续 ≥15分钟
+    NodeCPUStealHighCritical:
+      expr: node:cpu_steal:percent{alert_policy!~"nonprod|stress"} >= 20
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟CPU steal占比 ≥20%，连续 ≥10分钟
+    NodeMemoryUsageHighWarning:
+      expr: node:memory_usage:percent{alert_policy!~"nonprod|stress"} >= 96
+      for: 20m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: MemAvailable口径内存使用率 ≥96%，连续 ≥20分钟
+    NodeMemoryUsageHighCritical:
+      expr: node:memory_usage:percent{alert_policy!~"nonprod|stress"} >= 98
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: MemAvailable口径内存使用率 ≥98%，连续 ≥10分钟
+    NodeSwapPressureWarning:
+      expr: 'node:swap_usage:percent{alert_policy!~"nonprod|stress"} >= 60
+
+        and on (instance, job)
+
+        node:swap_activity:rate5m{alert_policy!~"nonprod|stress"} > 1
+
+        '
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: Swap使用率 ≥60%，且最近5分钟换入换出合计 >1页/秒，连续 ≥15分钟
+    NodeOOMKillDetected:
+      expr: increase(node_vmstat_oom_kill{job="node_exporter"}[10m]) > 0
+      severity: critical
+      annotations:
+        threshold: 最近10分钟OOM Kill计数器增量 >0；无额外for等待
+    NodeFilesystemUsageWarning:
+      expr: node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+      for: 30m
+      severity: warning
+      annotations:
+        threshold: 文件系统使用率（df近似口径） ≥85%，连续 ≥30分钟
+    NodeFilesystemUsageCritical:
+      expr: node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      severity: critical
+      annotations:
+        threshold: 文件系统使用率（df近似口径） ≥95%，连续 ≥10分钟
+    NodeFilesystemFreeSpaceCritical:
+      expr: 'node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"} < 2 * 1024 * 1024 * 1024
+
+        and on (instance, job, device, fstype, mountpoint)
+
+        node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 90
+
+        '
+      for: 10m
+      severity: critical
+      annotations:
+        threshold: 可用空间 <2GiB 且使用率 >90%，持续 ≥10分钟
+    NodeFilesystemFreeSpaceEmergency:
+      expr: 'node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"} < 1 * 1024 * 1024 * 1024
+
+        and on (instance, job, device, fstype, mountpoint)
+
+        node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 98
+
+        '
+      for: 5m
+      severity: emergency
+      annotations:
+        threshold: 可用空间 <1GiB 且使用率 >98%，持续 ≥5分钟
+    NodeFilesystemWillFillIn24Hours:
+      expr: 'predict_linear(node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"}[6h], 24 * 3600) < 0
+
+        and on (instance, job, device, fstype, mountpoint)
+
+        node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 75
+
+        '
+      for: 30m
+      severity: warning
+      annotations:
+        threshold: 以过去6小时可用空间线性拟合24小时后 <0，且当前使用率 >75%，连续 ≥30分钟
+    NodeFilesystemInodeWarning:
+      expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+      for: 30m
+      severity: warning
+      annotations:
+        threshold: inode使用率 ≥85%，连续 ≥30分钟
+    NodeFilesystemInodeCritical:
+      expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      severity: critical
+      annotations:
+        threshold: inode使用率 ≥95%，连续 ≥10分钟
+    NodeFilesystemInodeEmergency:
+      expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 99
+      for: 5m
+      severity: emergency
+      annotations:
+        threshold: inode使用率 ≥99%，连续 ≥5分钟
+    NodeFilesystemReadOnly:
+      expr: "node_filesystem_readonly{\n  job=\"node_exporter\",\n  \n  fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n \
+        \ mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n} == 1\nor\nnode_filesystem_readonly{job=\"\
+        node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"} == 1\n"
+      for: 2m
+      severity: critical
+      annotations:
+        threshold: 只读状态持续 ≥2分钟
+    NodeDiskIOUtilizationWarning:
+      expr: node:disk_io_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 90
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟块设备I/O忙碌时间占比 ≥90%，连续 ≥15分钟
+    NodeDiskIOUtilizationCritical:
+      expr: node:disk_io_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 98
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟块设备I/O忙碌时间占比 ≥98%，连续 ≥10分钟
+    NodeDiskLatencyWarning:
+      expr: '(node:disk_latency:seconds:rate5m{alert_policy!~"nonprod|stress"} * 1000) >= 50
+
+        and on (instance, job, device, direction)
+
+        node:disk_iops:rate5m{alert_policy!~"nonprod|stress"} >= 5
+
+        '
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟同方向平均延迟 ≥50 ms，且同方向IOPS ≥5，连续 ≥15分钟
+    NodeDiskLatencyCritical:
+      expr: '(node:disk_latency:seconds:rate5m{alert_policy!~"nonprod|stress"} * 1000) >= 200
+
+        and on (instance, job, device, direction)
+
+        node:disk_iops:rate5m{alert_policy!~"nonprod|stress"} >= 5
+
+        '
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟同方向平均延迟 ≥200 ms，且同方向IOPS ≥5，连续 ≥10分钟
+    NodeNetworkUtilizationWarning:
+      expr: node:network_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 85
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟单网卡单方向参考带宽利用率 ≥85%，连续 ≥15分钟
+    NodeNetworkUtilizationCritical:
+      expr: node:network_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟单网卡单方向参考带宽利用率 ≥95%，连续 ≥10分钟
+    NodeNetworkErrorDropRatioWarning:
+      expr: node:network_error_drop_ratio:rate5m{alert_policy!~"nonprod|stress"} >= 0.5
+      for: 10m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟错误及丢弃计数/收发包计数的比例 ≥0.5%，且最近5分钟收发包速率 >10包/秒，连续 ≥10分钟
+    NodeNetworkErrorDropRatioCritical:
+      expr: node:network_error_drop_ratio:rate5m{alert_policy!~"nonprod|stress"} >= 2
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟错误及丢弃计数/收发包计数的比例 ≥2%，且最近5分钟收发包速率 >10包/秒，连续 ≥10分钟
+    NodeTCPRetransmissionWarning:
+      expr: 'node:tcp_retransmission:percent{alert_policy!~"nonprod|stress"} >= 2
+
+        and on (instance, job)
+
+        node:tcp_out_segments:rate5m{alert_policy!~"nonprod|stress"} > 100
+
+        '
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 最近5分钟主机 TCP 重传率 ≥2%，正常发送量 >100段/秒，连续 ≥15分钟
+    NodeTCPRetransmissionCritical:
+      expr: 'node:tcp_retransmission:percent{alert_policy!~"nonprod|stress"} >= 5
+
+        and on (instance, job)
+
+        node:tcp_out_segments:rate5m{alert_policy!~"nonprod|stress"} > 100
+
+        '
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 最近5分钟主机 TCP 重传率 ≥5%，正常发送量 >100段/秒，连续 ≥10分钟
+    NodeFileDescriptorUsageWarning:
+      expr: node:filefd_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 系统文件句柄已分配量/系统上限 ≥85%，连续 ≥15分钟
+    NodeFileDescriptorUsageCritical:
+      expr: node:filefd_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 系统文件句柄已分配量/系统上限 ≥95%，连续 ≥10分钟
+    NodeConntrackUsageWarning:
+      expr: node:conntrack_usage:percent{alert_policy!~"nonprod|stress"} >= 80
+      for: 15m
+      keep_firing_for: 2m
+      severity: warning
+      annotations:
+        threshold: 连接跟踪表已用量/上限 ≥80%，连续 ≥15分钟
+    NodeConntrackUsageCritical:
+      expr: node:conntrack_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+      for: 10m
+      keep_firing_for: 2m
+      severity: critical
+      annotations:
+        threshold: 连接跟踪表已用量/上限 ≥95%，连续 ≥10分钟
+test_memory_recommended:
+- alert: NodeMemoryUsageHighWarning
+  for: 30m
+  annotations:
+    threshold: MemAvailable口径内存使用率 ≥97%，连续 ≥30分钟
+    summary: 内存可用余量持续偏低
+  expr: node:memory_usage:percent >= 97
+- alert: NodeMemoryUsageHighCritical
+  for: 15m
+  annotations:
+    threshold: MemAvailable口径内存使用率 ≥99%，连续 ≥15分钟
+    summary: 内存可用余量接近耗尽
+  expr: node:memory_usage:percent >= 99
+- alert: NodeSwapPressureWarning
+  for: 30m
+  annotations:
+    threshold: Swap使用率 ≥60%，且最近5分钟换入换出合计 >1页/秒，连续 ≥30分钟

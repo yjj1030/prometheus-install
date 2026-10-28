@@ -1,0 +1,22 @@
+rule_files:
+- ../../catalog/probes/availability.yml
+evaluation_interval: 30s
+tests:
+- name: Probe result failure despite successful scrape
+  interval: 30s
+  input_series:
+  - series: probe_success{job="blackbox",instance="https://service.example.invalid",probe_kind="http"}
+    values: 0+0x30
+  - series: up{job="blackbox",instance="https://service.example.invalid",probe_kind="http"}
+    values: 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="BlackboxEndpointFailed",alertstate="firing"}) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="BlackboxExporterScrapeFailed",alertstate="firing"}) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 0

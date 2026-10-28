@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/messaging/kafka.yml
+evaluation_interval: 30s
+tests:
+- name: Kafka offline partitions
+  interval: 30s
+  input_series:
+  - series: kafka_controller_kafkacontroller_offlinepartitionscount{job="kafka",instance="broker-a"}
+    values: 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="KafkaOfflinePartitions",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1

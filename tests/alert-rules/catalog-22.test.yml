@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/platform/prometheus.yml
+evaluation_interval: 30s
+tests:
+- name: Failed Prometheus reload
+  interval: 30s
+  input_series:
+  - series: prometheus_config_last_reload_successful{job="prometheus",instance="prom-a"}
+    values: 0+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="PrometheusConfigReloadFailed",alertstate="firing"}) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 1

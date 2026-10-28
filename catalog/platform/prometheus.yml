@@ -1,0 +1,339 @@
+groups:
+- name: prometheus_self_config_and_rules
+  interval: 30s
+  rules:
+  - alert: PrometheusConfigReloadFailed
+    expr: prometheus_config_last_reload_successful{job="prometheus"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: config
+      alert_type: state
+      condition_id: prometheus_config_reload
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus配置重载失败
+      resolved_summary: Prometheus配置重载重要告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 最近一次重载失败（成功标志=0）
+      threshold: 最近一次配置重载状态=失败，持续 ≥5分钟
+      impact: 预期新配置可能未生效，旧有效配置可能仍在运行。
+      action: 先做配置和规则校验，再检查日志与实际生效配置。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusRuleEvaluationFailures
+    expr: increase(prometheus_rule_evaluation_failures_total{job="prometheus"}[15m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: rules
+      alert_type: event
+      condition_id: prometheus_rule_evaluation_failure
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus规则评估出现失败
+      resolved_summary: 规则评估失败事件重要告警已解除
+      object: Prometheus={{ $labels.instance }}{{ if $labels.rule_group }} / 规则组={{ $labels.rule_group }}{{ end
+        }}
+      current_value: 观察窗口内检测到计数器增量 >0
+      threshold: 最近15分钟规则评估失败增量 >0，并持续 ≥5分钟
+      impact: 受影响规则可能未能正确计算或告警。
+      action: 从日志定位规则组与表达式，检查执行错误和依赖指标。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusRuleEvaluationsMissed
+    expr: increase(prometheus_rule_group_iterations_missed_total{job="prometheus"}[15m]) > 0
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: rules
+      alert_type: event
+      condition_id: prometheus_rule_evaluation_missed
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus规则评估周期被跳过
+      resolved_summary: 规则评估跳过事件一般告警已解除
+      object: Prometheus={{ $labels.instance }}{{ if $labels.rule_group }} / 规则组={{ $labels.rule_group }}{{ end
+        }}
+      current_value: 观察窗口内检测到计数器增量 >0
+      threshold: 最近15分钟 missed iterations 增量 >0，并持续 ≥10分钟
+      impact: 规则评估时效可能下降。
+      action: 核对规则组执行耗时与评估周期，再查负载和表达式。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusTargetSyncFailure
+    expr: increase(prometheus_target_sync_failed_total{job="prometheus"}[30m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: config
+      alert_type: event
+      condition_id: prometheus_target_sync_failure
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus采集目标同步失败
+      resolved_summary: 目标同步失败事件重要告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 观察窗口内检测到计数器增量 >0
+      threshold: 最近30分钟 target sync failure 增量 >0，并持续 ≥5分钟
+      impact: 新目标或配置变动可能未及时生效。
+      action: 先查服务发现、file_sd文件和日志，再核对实际Targets。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+- name: prometheus_self_alert_delivery
+  interval: 30s
+  rules:
+  - alert: PrometheusNotConnectedToAlertmanager
+    expr: max_over_time(prometheus_notifications_alertmanagers_discovered{job="prometheus"}[5m]) < 1
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: alerting
+      alert_type: state
+      condition_id: prometheus_alertmanager_discovery
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus未发现Alertmanager目标
+      resolved_summary: Alertmanager目标发现重要告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 发现目标数：0（5分钟窗口最大值）
+      threshold: 5分钟窗口内可发现 Alertmanager 数量始终 <1，并持续 ≥5分钟
+      impact: 该Prometheus的告警发送链路存在风险。
+      action: 先核对alerting服务发现配置，再验证目标可用性和发送结果。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusAlertDeliveryErrors
+    expr: "(rate(prometheus_notifications_errors_total{job=\"prometheus\"}[5m])\n / rate(prometheus_notifications_sent_total{job=\"\
+      prometheus\"}[5m])) * 100 > 3\nand\nrate(prometheus_notifications_sent_total{job=\"prometheus\"}[5m]) > 0\n"
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: alerting
+      alert_type: threshold
+      condition_id: prometheus_alert_delivery_errors
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus告警发送失败指标偏高
+      resolved_summary: 告警发送失败率重要告警已解除
+      object: Prometheus={{ $labels.instance }}{{ if $labels.alertmanager }} / 接收端={{ $labels.alertmanager }}{{
+        end }}
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟发送错误量/发送尝试量 >3%，且有发送尝试，连续 ≥10分钟
+      impact: 向Alertmanager传送告警可能受影响。
+      action: 先核对发送错误、HTTP响应及目标状态，再校验指标计数口径。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusAlertDeliveryStopped
+    expr: 'rate(prometheus_notifications_errors_total{job="prometheus"}[5m]) > 0
+
+      and
+
+      rate(prometheus_notifications_sent_total{job="prometheus"}[5m]) == 0
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: alerting
+      alert_type: state
+      condition_id: prometheus_alert_delivery_stopped
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus告警发送持续失败且发送计数未增长
+      resolved_summary: 告警发送停滞条件已解除
+      object: Prometheus={{ $labels.instance }} / 接收端={{ $labels.alertmanager }}
+      current_value: 最近5分钟发送错误持续发生，sent计数未增长
+      threshold: 错误增速>0且sent增速=0，连续 ≥5分钟
+      action: 检查Alertmanager服务、HTTP响应和网络；该链路失效时使用已有外部监控兜底。
+- name: prometheus_self_remote_write
+  interval: 30s
+  rules:
+  - alert: PrometheusRemoteWriteFailures
+    expr: "(\n  (\n    rate(prometheus_remote_storage_failed_samples_total{job=\"prometheus\"}[5m])\n    or\n  \
+      \  rate(prometheus_remote_storage_samples_failed_total{job=\"prometheus\"}[5m])\n  )\n  /\n  (\n    (\n  \
+      \    rate(prometheus_remote_storage_failed_samples_total{job=\"prometheus\"}[5m])\n      or\n      rate(prometheus_remote_storage_samples_failed_total{job=\"\
+      prometheus\"}[5m])\n    )\n    +\n    (\n      rate(prometheus_remote_storage_succeeded_samples_total{job=\"\
+      prometheus\"}[5m])\n      or\n      rate(prometheus_remote_storage_samples_total{job=\"prometheus\"}[5m])\n\
+      \    )\n  )\n) * 100 > 1\n"
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: remote_write
+      alert_type: threshold
+      condition_id: prometheus_remote_write_failures
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus远程写入出现失败
+      resolved_summary: 远程写入终止失败重要告警已解除
+      object: Prometheus={{ $labels.instance }} / 远端队列={{ $labels.remote_name }}{{ if $labels.url }} / 端点={{ $labels.url
+        }}{{ end }}
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: Remote Write 失败率 >1%，持续 ≥10分钟
+      impact: 部分数据可能无法写入远端，实际缺口须核查。
+      action: 核查具体remote队列的错误、鉴权和远端写入结果。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusRemoteWriteBehindWarning
+    expr: "(\n  (\n    max_over_time(prometheus_remote_storage_queue_highest_timestamp_seconds{job=\"prometheus\"\
+      }[5m])\n    -\n    max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=\"prometheus\"\
+      }[5m])\n  )\n  or\n  (\n    max_over_time(prometheus_remote_storage_highest_timestamp_in_seconds{job=\"prometheus\"\
+      }[5m])\n    - ignoring(remote_name, url) group_right\n    max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=\"\
+      prometheus\"}[5m])\n  )\n) > 120\n"
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: remote_write
+      alert_type: threshold
+      condition_id: prometheus_remote_write_behind
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus远程写入时间戳落后
+      resolved_summary: 远程写入时间戳落后一般告警已解除
+      object: Prometheus={{ $labels.instance }} / 远端队列={{ $labels.remote_name }}{{ if $labels.url }} / 端点={{ $labels.url
+        }}{{ end }}
+      current_value: 发送时间戳落后 {{ $value | humanizeDuration }}
+      threshold: 发送时间戳落后 >120秒，持续 ≥10分钟
+      impact: 远端数据可能延迟，不能直接当作丢失时长。
+      action: 先查队列积压、远端写入和网络，再评估分片与限流。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusRemoteWriteBehindCritical
+    expr: "(\n  (\n    max_over_time(prometheus_remote_storage_queue_highest_timestamp_seconds{job=\"prometheus\"\
+      }[5m])\n    -\n    max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=\"prometheus\"\
+      }[5m])\n  )\n  or\n  (\n    max_over_time(prometheus_remote_storage_highest_timestamp_in_seconds{job=\"prometheus\"\
+      }[5m])\n    - ignoring(remote_name, url) group_right\n    max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=\"\
+      prometheus\"}[5m])\n  )\n) > 600\n"
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: remote_write
+      alert_type: threshold
+      condition_id: prometheus_remote_write_behind
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus远程写入时间戳落后
+      resolved_summary: 远程写入时间戳落后重要告警已解除
+      object: Prometheus={{ $labels.instance }} / 远端队列={{ $labels.remote_name }}{{ if $labels.url }} / 端点={{ $labels.url
+        }}{{ end }}
+      current_value: 发送时间戳落后 {{ $value | humanizeDuration }}
+      threshold: 发送时间戳落后 >600秒，持续 ≥10分钟
+      impact: 远端数据可能延迟，不能直接当作丢失时长。
+      action: 先查队列积压、远端写入和网络，再评估分片与限流。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusRemoteWriteShardsAtLimit
+    expr: 'max_over_time(prometheus_remote_storage_shards_desired{job="prometheus"}[5m])
+
+      >
+
+      max_over_time(prometheus_remote_storage_shards_max{job="prometheus"}[5m])
+
+      '
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: remote_write
+      alert_type: threshold
+      condition_id: prometheus_remote_write_shards_limit
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus远程写入所需分片达到配置上限
+      resolved_summary: 远程写入分片需求一般告警已解除
+      object: Prometheus={{ $labels.instance }} / 远端队列={{ $labels.remote_name }}{{ if $labels.url }} / 端点={{ $labels.url
+        }}{{ end }}
+      current_value: 所需分片 {{ printf "%.0f" $value }}，已超过配置上限
+      threshold: 最近5分钟所需分片最大值 >配置分片上限最大值，连续 ≥15分钟
+      impact: 当前配置可能限制后续写入处理能力。
+      action: 先看积压、远端能力和网络，再评估max_shards与资源。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+- name: prometheus_self_tsdb_and_query
+  interval: 30s
+  rules:
+  - alert: PrometheusTSDBCompactionsFailing
+    expr: increase(prometheus_tsdb_compactions_failed_total{job="prometheus"}[1h]) > 0
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: tsdb
+      alert_type: event
+      condition_id: prometheus_tsdb_compaction_failure
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus本地时序块压缩出现失败
+      resolved_summary: 本地时序块压缩失败事件一般告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 观察窗口内检测到计数器增量 >0
+      threshold: 最近1小时 compaction failure 增量 >0，并持续 ≥15分钟
+      impact: 本地数据维护和资源占用可能受影响。
+      action: 先查TSDB日志、磁盘空间、权限和I/O状态。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusTSDBReloadsFailing
+    expr: increase(prometheus_tsdb_reloads_failures_total{job="prometheus"}[1h]) > 0
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: tsdb
+      alert_type: event
+      condition_id: prometheus_tsdb_reload_failure
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus本地时序块加载出现失败
+      resolved_summary: 本地时序块加载失败事件一般告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 观察窗口内检测到计数器增量 >0
+      threshold: 最近1小时 block reload failure 增量 >0，并持续 ≥15分钟
+      impact: 部分时序块加载可能受影响。
+      action: 先查日志、数据目录完整性、权限和磁盘I/O。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: PrometheusHighQueryLoad
+    expr: "(avg_over_time(prometheus_engine_queries{job=\"prometheus\"}[5m])\n / max_over_time(prometheus_engine_queries_concurrent_max{job=\"\
+      prometheus\"}[5m])) * 100 > 80\nand\nmax_over_time(prometheus_engine_queries_concurrent_max{job=\"prometheus\"\
+      }[5m]) > 0\n"
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: monitoring
+      category: monitoring
+      monitoring_component: query
+      alert_type: threshold
+      condition_id: prometheus_query_load
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Prometheus查询并发占比偏高
+      resolved_summary: 查询并发占比一般告警已解除
+      object: Prometheus={{ $labels.instance }}
+      current_value: 最近5分钟平均查询并发占比 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟平均并发/窗口内并发上限最大值 >80%，且上限 >0，连续 ≥15分钟
+      impact: 查询等待或超时风险可能增加。
+      action: 先核对慢查询和刷新频率，再结合实际CPU、内存与查询配置。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'

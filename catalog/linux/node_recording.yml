@@ -1,0 +1,189 @@
+groups:
+- name: node_usage_record_rules
+  interval: 1m
+  rules:
+  - record: node:host_info
+    expr: "max by (instance, job, asset_ip, nodename, machine, sysname, release) (\n  node_uname_info{job=\"node_exporter\"\
+      }\n)\n"
+  - record: node:host_identity:last_seen_timestamp_seconds
+    expr: "topk by (instance, job) (\n  1,\n  max_over_time(\n    timestamp(node_uname_info{job=\"node_exporter\"\
+      })[24h:1m]\n  )\n)\n"
+  - record: node:hostname:last_seen_timestamp_seconds
+    expr: "max by (instance, job, nodename) (\n  max_over_time(\n    timestamp(node_uname_info{job=\"node_exporter\"\
+      ,nodename!=\"\"} == 1)[24h:1m]\n  )\n)\n"
+  - record: node:monitor_target:last_seen_timestamp_seconds
+    expr: "topk by (instance, job) (\n  1,\n  max_over_time(timestamp(up{job=\"node_exporter\"})[24h:1m])\n)\n"
+  - record: cpu:usage:rate1m
+    expr: "(\n  1 -\n  avg without (cpu, mode) (\n    irate(node_cpu_seconds_total{job=\"node_exporter\",mode=\"\
+      idle\"}[3m])\n  )\n) * 100\n"
+  - record: mem:usage:rate1m
+    expr: "(\n  1 -\n  node_memory_MemAvailable_bytes{job=\"node_exporter\"}\n  /\n  node_memory_MemTotal_bytes{job=\"\
+      node_exporter\"}\n) * 100\n"
+  - record: node:cpu_usage:percent
+    expr: "(\n  1 -\n  avg without (cpu, mode) (\n    rate(node_cpu_seconds_total{job=\"node_exporter\",mode=\"\
+      idle\"}[5m])\n  )\n) * 100\n"
+  - record: node:cpu_iowait:percent
+    expr: "avg without (cpu, mode) (\n  rate(node_cpu_seconds_total{job=\"node_exporter\",mode=\"iowait\"}[5m])\n\
+      ) * 100\n"
+  - record: node:cpu_steal:percent
+    expr: "avg without (cpu, mode) (\n  rate(node_cpu_seconds_total{job=\"node_exporter\",mode=\"steal\"}[5m])\n\
+      ) * 100\n"
+  - record: node:cpu_count
+    expr: "count without (cpu, mode) (\n  node_cpu_seconds_total{job=\"node_exporter\",mode=\"idle\"}\n)\n"
+  - record: node:load1_per_cpu:ratio
+    expr: 'node_load1{job="node_exporter"}
+
+      /
+
+      node:cpu_count
+
+      '
+  - record: node:memory_usage:percent
+    expr: "(\n  1 -\n  node_memory_MemAvailable_bytes{job=\"node_exporter\"}\n  /\n  node_memory_MemTotal_bytes{job=\"\
+      node_exporter\"}\n) * 100\n"
+  - record: node:swap_status:info
+    expr: "label_replace(\n  0 * (node_memory_SwapTotal_bytes{job=\"node_exporter\"} == 0) + 1,\n  \"swap_status\"\
+      , \"None\", \"instance\", \".+\"\n)\nor\nlabel_replace(\n  0 * (node_memory_SwapTotal_bytes{job=\"node_exporter\"\
+      } > 0) + 1,\n  \"swap_status\", \"Enabled\", \"instance\", \".+\"\n)\n"
+  - record: node:swap_usage:percent
+    expr: "(\n  1 -\n  node_memory_SwapFree_bytes{job=\"node_exporter\"}\n  /\n  node_memory_SwapTotal_bytes{job=\"\
+      node_exporter\"}\n) * 100\nand on (instance, job)\n  node_memory_SwapTotal_bytes{job=\"node_exporter\"} >\
+      \ 0\n"
+  - record: node:swap_activity:rate5m
+    expr: "(\n  rate(node_vmstat_pswpin{job=\"node_exporter\"}[5m])\n  +\n  rate(node_vmstat_pswpout{job=\"node_exporter\"\
+      }[5m])\n)\nand on (instance, job)\n  node_memory_SwapTotal_bytes{job=\"node_exporter\"} > 0\n"
+  - record: node:filesystem_usage:percent
+    expr: "(\n  (\n    (\n      (node_filesystem_size_bytes{\n        job=\"node_exporter\",\n        fstype=~\"\
+      ext[234]?|xfs|btrfs|zfs\",\n        mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n      } or node_filesystem_size_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      })\n      -\n      (node_filesystem_free_bytes{\n        job=\"node_exporter\",\n        fstype=~\"ext[234]?|xfs|btrfs|zfs\"\
+      ,\n        mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n      } or\
+      \ node_filesystem_free_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      })\n    ) * 100\n    /\n    (\n      (node_filesystem_avail_bytes{\n        job=\"node_exporter\",\n     \
+      \   fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n        mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n      } or node_filesystem_avail_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      })\n      +\n      (\n        (node_filesystem_size_bytes{\n          job=\"node_exporter\",\n          fstype=~\"\
+      ext[234]?|xfs|btrfs|zfs\",\n          mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n        } or node_filesystem_size_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      })\n        -\n        (node_filesystem_free_bytes{\n          job=\"node_exporter\",\n          fstype=~\"\
+      ext[234]?|xfs|btrfs|zfs\",\n          mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n        } or node_filesystem_free_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      })\n      )\n    )\n  )\n  and on (instance, job, device, fstype, mountpoint)\n    (node_filesystem_size_bytes{\n\
+      \      job=\"node_exporter\",\n      fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n      mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n    } or node_filesystem_size_bytes{job=\"node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"\
+      }) > 0\n)\n"
+  - record: node:filesystem_avail:bytes
+    expr: "(node_filesystem_avail_bytes{\n  job=\"node_exporter\",\n  fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n  mountpoint!~\"\
+      /run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n} or node_filesystem_avail_bytes{job=\"\
+      node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"})\nand on (instance, job, device,\
+      \ fstype, mountpoint)\n  (node_filesystem_size_bytes{\n    job=\"node_exporter\",\n    fstype=~\"ext[234]?|xfs|btrfs|zfs\"\
+      ,\n    mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n  } or node_filesystem_size_bytes{job=\"\
+      node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"}) > 0\n"
+  - record: node:filesystem_inode_usage:percent
+    expr: "(\n  1 -\n  node_filesystem_files_free{\n    job=\"node_exporter\",\n    fstype=~\"ext[234]?|xfs|btrfs|zfs\"\
+      ,\n    mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n  }\n  /\n  node_filesystem_files{\n\
+      \    job=\"node_exporter\",\n    fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n    mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n  }\n) * 100\nand on (instance, job, device, fstype, mountpoint)\n  node_filesystem_files{\n    job=\"node_exporter\"\
+      ,\n    fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n    mountpoint!~\"/run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\
+      \n  } > 0\n"
+  - record: node:filesystem_usage:percent:canonical
+    expr: "topk by (instance, job, asset_ip, device) (\n  1,\n  node:filesystem_usage:percent\n)\n"
+  - record: node:filesystem_avail:bytes:canonical
+    expr: "topk by (instance, job, asset_ip, device) (\n  1,\n  node:filesystem_avail:bytes\n)\n"
+  - record: node:filesystem_inode_usage:percent:canonical
+    expr: "topk by (instance, job, asset_ip, device) (\n  1,\n  node:filesystem_inode_usage:percent\n)\n"
+  - record: node:filesystem_usage:max
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:filesystem_usage:percent:canonical\n)\n"
+  - record: node:disk_io_utilization:rate5m
+    expr: "rate(\n  node_disk_io_time_seconds_total{\n    job=\"node_exporter\",\n    device!~\"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"\
+      \n  }[5m]\n) * 100\n"
+  - record: node:disk_read_iops:rate5m
+    expr: 'rate(node_disk_reads_completed_total{job="node_exporter",device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+"}[5m])
+
+      '
+  - record: node:disk_write_iops:rate5m
+    expr: 'rate(node_disk_writes_completed_total{job="node_exporter",device!~"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+"}[5m])
+
+      '
+  - record: node:disk_read_latency:seconds:rate5m
+    expr: "(\n  rate(node_disk_read_time_seconds_total{job=\"node_exporter\",device!~\"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"\
+      }[5m])\n  /\n  rate(node_disk_reads_completed_total{job=\"node_exporter\",device!~\"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"\
+      }[5m])\n)\nand on (instance, job, device)\n  rate(node_disk_reads_completed_total{job=\"node_exporter\",device!~\"\
+      loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"}[5m]) > 0\n"
+  - record: node:disk_write_latency:seconds:rate5m
+    expr: "(\n  rate(node_disk_write_time_seconds_total{job=\"node_exporter\",device!~\"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"\
+      }[5m])\n  /\n  rate(node_disk_writes_completed_total{job=\"node_exporter\",device!~\"loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"\
+      }[5m])\n)\nand on (instance, job, device)\n  rate(node_disk_writes_completed_total{job=\"node_exporter\",device!~\"\
+      loop.*|ram.*|fd.*|sr[0-9]+|dm-[0-9]+\"}[5m]) > 0\n"
+  - record: node:disk_latency:seconds:rate5m
+    expr: "label_replace(\n  node:disk_read_latency:seconds:rate5m,\n  \"direction\", \"READ\", \"device\", \".+\"\
+      \n)\nor\nlabel_replace(\n  node:disk_write_latency:seconds:rate5m,\n  \"direction\", \"WRITE\", \"device\"\
+      , \".+\"\n)\n"
+  - record: node:disk_iops:rate5m
+    expr: "label_replace(\n  node:disk_read_iops:rate5m,\n  \"direction\", \"READ\", \"device\", \".+\"\n)\nor\n\
+      label_replace(\n  node:disk_write_iops:rate5m,\n  \"direction\", \"WRITE\", \"device\", \".+\"\n)\n"
+  - record: node:disk_io_utilization:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:disk_io_utilization:rate5m\n)\n"
+  - record: node:disk_read_latency:seconds:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:disk_read_latency:seconds:rate5m\n)\n"
+  - record: node:disk_write_latency:seconds:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:disk_write_latency:seconds:rate5m\n)\n"
+  - record: node:network_throughput:rate5m
+    expr: "label_replace(\n  rate(node_network_receive_bytes_total{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      }[5m]),\n  \"direction\", \"RX\", \"device\", \".+\"\n)\nor\nlabel_replace(\n  rate(node_network_transmit_bytes_total{job=\"\
+      node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"}[5m]),\n \
+      \ \"direction\", \"TX\", \"device\", \".+\"\n)\n"
+  - record: node:network_utilization:rate5m
+    expr: "label_replace(\n  (\n    rate(node_network_receive_bytes_total{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      }[5m])\n    /\n    on (instance, job, device)\n    node_network_speed_bytes{job=\"node_exporter\",device!~\"\
+      lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"}\n  ) * 100\n  and on (instance, job,\
+      \ device)\n    node_network_speed_bytes{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      } > 0,\n  \"direction\", \"RX\", \"device\", \".+\"\n)\nor\nlabel_replace(\n  (\n    rate(node_network_transmit_bytes_total{job=\"\
+      node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"}[5m])\n  \
+      \  /\n    on (instance, job, device)\n    node_network_speed_bytes{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      }\n  ) * 100\n  and on (instance, job, device)\n    node_network_speed_bytes{job=\"node_exporter\",device!~\"\
+      lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"} > 0,\n  \"direction\", \"TX\", \"device\"\
+      , \".+\"\n)\n"
+  - record: node:network_errors_drops:rate5m
+    expr: 'rate(node_network_receive_drop_total{job="node_exporter",device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      + rate(node_network_transmit_drop_total{job="node_exporter",device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      + rate(node_network_receive_errs_total{job="node_exporter",device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      + rate(node_network_transmit_errs_total{job="node_exporter",device!~"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*"}[5m])
+
+      '
+  - record: node:network_error_drop_ratio:rate5m
+    expr: "(\n  node:network_errors_drops:rate5m\n  /\n  clamp_min(\n    rate(node_network_receive_packets_total{job=\"\
+      node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"}[5m])\n  \
+      \  + rate(node_network_transmit_packets_total{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      }[5m]),\n    1\n  )\n) * 100\nand on (instance, job, device)\n  (\n    rate(node_network_receive_packets_total{job=\"\
+      node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"}[5m])\n  \
+      \  + rate(node_network_transmit_packets_total{job=\"node_exporter\",device!~\"lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tun.*|tap.*\"\
+      }[5m])\n  ) > 10\n"
+  - record: node:network_utilization:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:network_utilization:rate5m\n)\n"
+  - record: node:network_errors_drops:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:network_errors_drops:rate5m\n)\n"
+  - record: node:network_error_drop_ratio:max:rate5m
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  node:network_error_drop_ratio:rate5m\n)\n"
+  - record: node:tcp_retrans_segments:rate5m
+    expr: rate(node_netstat_Tcp_RetransSegs{job="node_exporter"}[5m])
+  - record: node:tcp_out_segments:rate5m
+    expr: rate(node_netstat_Tcp_OutSegs{job="node_exporter"}[5m])
+  - record: node:tcp_retransmission:percent
+    expr: "(\n  node:tcp_retrans_segments:rate5m / node:tcp_out_segments:rate5m\n) * 100\nand on (instance, job)\
+      \ node:tcp_out_segments:rate5m > 0\n"
+  - record: node:filefd_usage:percent
+    expr: "(\n  node_filefd_allocated{job=\"node_exporter\"}\n  /\n  node_filefd_maximum{job=\"node_exporter\"}\n\
+      ) * 100\nand on (instance, job)\n  node_filefd_maximum{job=\"node_exporter\"} > 0\n"
+  - record: node:conntrack_usage:percent
+    expr: "(\n  node_nf_conntrack_entries{job=\"node_exporter\"}\n  /\n  node_nf_conntrack_entries_limit{job=\"\
+      node_exporter\"}\n) * 100\nand on (instance, job)\n  node_nf_conntrack_entries_limit{job=\"node_exporter\"\
+      } > 0\n"
+  - record: node:resource_pressure:max
+    expr: "topk by (instance, job, asset_ip) (\n  1,\n  label_replace(node:cpu_usage:percent, \"pressure_source\"\
+      , \"CPU\", \"instance\", \".+\")\n  or\n  label_replace(node:memory_usage:percent, \"pressure_source\", \"\
+      Memory\", \"instance\", \".+\")\n  or\n  label_replace(node:disk_io_utilization:max:rate5m, \"pressure_source\"\
+      , \"DiskIO\", \"instance\", \".+\")\n)\n"

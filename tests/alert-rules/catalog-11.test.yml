@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/network/snmp.yml
+evaluation_interval: 30s
+tests:
+- name: Admin disabled interface is not down alert
+  interval: 30s
+  input_series:
+  - series: ifAdminStatus{job="snmp",instance="switch-a",ifIndex="1"}
+    values: 2+0x30
+  - series: ifOperStatus{job="snmp",instance="switch-a",ifIndex="1"}
+    values: 2+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="SNMPInterfaceDown",alertstate="firing"}) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 0

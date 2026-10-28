@@ -1,0 +1,28 @@
+rule_files:
+- ../../catalog/platform/vmalert.yml
+evaluation_interval: 30s
+tests:
+- name: VMAlert no input diagnosis
+  interval: 30s
+  input_series:
+  - series: vmalert_alerting_rules_last_evaluation_series_fetched{job="vmalert",instance="vmalert-a",alertname="ExampleRule"}
+    values: 0+0x140
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="VMAlertSelectorNoSeries",alertstate="firing"}) or
+      vector(0)
+    eval_time: 60m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: VMAlert native rule error counter
+  interval: 30s
+  input_series:
+  - series: vmalert_alerting_rules_errors_total{job="vmalert",instance="vmalert-a"}
+    values: 0+1x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="VMAlertEvaluationError",alertstate="firing"}) or
+      vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1

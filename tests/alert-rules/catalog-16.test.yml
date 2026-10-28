@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/application/jvm.yml
+evaluation_interval: 30s
+tests:
+- name: JVM unknown max heap excluded
+  interval: 30s
+  input_series:
+  - series: jvm_memory_used_bytes{instance="jvm-a",area="heap",id="heap"}
+    values: 100+0x60
+  - series: jvm_memory_max_bytes{instance="jvm-a",area="heap",id="heap"}
+    values: -1+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="JVMHeapHigh",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0

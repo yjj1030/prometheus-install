@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/application/contracts.yml
+evaluation_interval: 30s
+tests:
+- name: Backup missed RPO from persistent last-success
+  interval: 30s
+  input_series:
+  - series: ops_backup_last_success_timestamp_seconds{service="oa",backup_job="daily"}
+    values: 0+0x60
+  - series: ops_backup_rpo_seconds{service="oa",backup_job="daily"}
+    values: 60+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="BackupRPOExceeded",alertstate="firing"}) or vector(0)
+    eval_time: 17m
+    exp_samples:
+    - labels: '{}'
+      value: 1

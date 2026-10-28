@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/common/targets.yml
+evaluation_interval: 30s
+tests:
+- name: Relabel discards all samples
+  interval: 30s
+  input_series:
+  - series: scrape_samples_scraped{job="app",instance="app-a"}
+    values: 100+0x60
+  - series: scrape_samples_post_metric_relabeling{job="app",instance="app-a"}
+    values: 0+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="ScrapeMetricRelabelDropsAll",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1

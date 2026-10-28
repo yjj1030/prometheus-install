@@ -1,0 +1,170 @@
+groups:
+- name: kubernetes_workloads
+  interval: 30s
+  rules:
+  - alert: KubePodNotReady
+    expr: kube_pod_status_ready{condition="true"} == 0 and on(cluster,namespace,pod,uid) kube_pod_status_phase{phase="Running"}
+      == 1
+    labels:
+      severity: warning
+      category: kubernetes
+      condition_id: kube_ready
+      alert_type: state
+    annotations:
+      summary: 运行中Pod持续未就绪
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 看事件、探针、依赖；排除预期发布窗口。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: kube_pod_status_ready{condition="true"} == 0 and on(cluster,namespace,pod,uid) kube_pod_status_phase{phase="Running"}
+        == 1；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: KubePodCrashLoop
+    expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+    labels:
+      severity: warning
+      category: kubernetes
+      condition_id: kube_crash
+      alert_type: state
+    annotations:
+      summary: Pod反复崩溃
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 查看previous日志、退出码和配置变更。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1；持续 10m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 10m
+  - alert: KubeContainerOOMKilled
+    expr: (increase(kube_pod_container_status_restarts_total[10m]) > 0) and on(cluster,namespace,pod,container,uid)
+      (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)
+    labels:
+      severity: critical
+      category: kubernetes
+      condition_id: kube_oom
+      alert_type: state
+    annotations:
+      summary: 容器因OOM终止并发生重启
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 终止原因是最近一次记录，联合重启增量降低旧状态误报，仍需日志核实。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (increase(kube_pod_container_status_restarts_total[10m]) > 0) and on(cluster,namespace,pod,container,uid)
+        (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)；持续 无额外for等待
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: KubeDeploymentUnavailable
+    expr: (kube_deployment_spec_replicas > 0) and (kube_deployment_status_replicas_available == 0)
+    labels:
+      severity: critical
+      category: kubernetes
+      condition_id: kube_deployment
+      alert_type: state
+    annotations:
+      summary: Deployment无可用副本
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核查发布、调度、镜像及探针，确认服务影响。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (kube_deployment_spec_replicas > 0) and (kube_deployment_status_replicas_available == 0)；持续 10m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 10m
+  - alert: KubeStatefulSetNotReady
+    expr: kube_statefulset_replicas - kube_statefulset_status_replicas_ready > 0
+    labels:
+      severity: warning
+      category: kubernetes
+      condition_id: kube_statefulset
+      alert_type: state
+    annotations:
+      summary: StatefulSet就绪副本不足
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 排查PVC、调度和有状态服务成员健康。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: kube_statefulset_replicas - kube_statefulset_status_replicas_ready > 0；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: KubePVCUnbound
+    expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+    labels:
+      severity: warning
+      category: kubernetes
+      condition_id: kube_pvc
+      alert_type: state
+    annotations:
+      summary: PVC持续Pending
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 检查StorageClass、配额、存储供应和事件。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: KubeVolumeSpaceLow
+    expr: (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.1) and (kubelet_volume_stats_capacity_bytes
+      > 0)
+    labels:
+      severity: warning
+      category: kubernetes
+      condition_id: kube_volume
+      alert_type: state
+    annotations:
+      summary: 持久卷空间不足10%
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对PVC容量、增长和扩容能力。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#kubernetes
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.1) and (kubelet_volume_stats_capacity_bytes
+        > 0)；持续 20m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 20m

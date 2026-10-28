@@ -1,0 +1,219 @@
+rule_files:
+- ../../scenarios/sk-91/production/node_alerts.yml
+evaluation_interval: 30s
+tests:
+- name: Static hostname wins
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default",hostname="managed-host"}
+    values: 0+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+        hostname: managed-host
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: managed-host
+- name: nodename label fallback
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default",nodename="node-label"}
+    values: 0+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+        nodename: node-label
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: node-label
+- name: fresh uname fallback
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  - series: node_uname_info{job="node_exporter",instance="host-a:9100",nodename="uname-host"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: uname-host
+- name: historical hostname fallback
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  - series: node:hostname:last_seen_timestamp_seconds{job="node_exporter",instance="host-a:9100",nodename="history-host"}
+    values: 60+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: history-host
+- name: conflicting fresh hostnames are not guessed
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  - series: node_uname_info{job="node_exporter",instance="host-a:9100",nodename="a"}
+    values: 1+0x10
+  - series: node_uname_info{job="node_exporter",instance="host-a:9100",nodename="b"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: 未提供
+- name: other job does not supply hostname
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  - series: node_uname_info{job="another_job",instance="host-a:9100",nodename="wrong-host"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: 未提供
+- name: missing identity remains explicit
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: NodeDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        asset_type: server
+        category: availability
+        alert_type: state
+        condition_id: node_down
+        notify_profile: availability
+        environment_class: prod
+        instance: host-a:9100
+        job: node_exporter
+        alert_policy: default
+      exp_annotations:
+        summary: Node Exporter采集失败
+        resolved_summary: Node Exporter采集失败重要告警已解除
+        object: 采集目标=host-a:9100 / 主机=host-a:9100
+        current_value: 抓取失败（up=0）
+        threshold: Prometheus抓取up=0，连续 ≥2分钟
+        impact: 主机指标可能缺失。
+        action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+        hostname: 未提供

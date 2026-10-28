@@ -1,0 +1,62 @@
+# 示例，非现场配置。先合并现有接收器/路由，再检查和验收。
+global:
+  resolve_timeout: 5m
+route:
+  receiver: review
+  group_by: [site, origin_prometheus, environment_class, condition_id, job, instance, device, mountpoint, direction, collector]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    - matchers: ['alertname="Watchdog"']
+      receiver: deadman
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+    - matchers: ['severity="info"']
+      receiver: record-only
+    - matchers: ['severity="warning"']
+      receiver: planned
+      group_wait: 1m
+      repeat_interval: 24h
+    - matchers: ['severity="critical"']
+      receiver: oncall
+      repeat_interval: 4h
+    - matchers: ['severity="emergency"']
+      receiver: urgent
+      repeat_interval: 1h
+receivers:
+  - name: review
+    webhook_configs:
+      - url: https://notify.example.invalid/review
+        send_resolved: true
+  - name: record-only
+  - name: planned
+    webhook_configs:
+      - url: https://notify.example.invalid/planned
+        send_resolved: true
+  - name: oncall
+    webhook_configs:
+      - url: https://notify.example.invalid/oncall
+        send_resolved: true
+  - name: urgent
+    webhook_configs:
+      - url: https://notify.example.invalid/urgent
+        send_resolved: true
+  - name: deadman
+    webhook_configs:
+      - url: https://deadman.example.invalid/heartbeat
+        send_resolved: false
+inhibit_rules:
+  - source_matchers: ['severity="emergency"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    target_matchers: ['severity=~"critical|warning|info"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    equal: [site, origin_prometheus, environment_class, job, instance, condition_id, device, mountpoint, direction, collector]
+  - source_matchers: ['severity="critical"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    target_matchers: ['severity=~"warning|info"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    equal: [site, origin_prometheus, environment_class, job, instance, condition_id, device, mountpoint, direction, collector]
+  - source_matchers: ['severity="warning"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    target_matchers: ['severity="info"', 'condition_id!=""', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    equal: [site, origin_prometheus, environment_class, job, instance, condition_id, device, mountpoint, direction, collector]
+  - source_matchers: ['condition_id="node_down"', 'severity=~"critical|emergency"', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    target_matchers: ['asset_type="server"', 'alert_type="threshold"', 'category=~"compute|memory|storage|network|system_limit"', 'job!=""', 'instance!=""', 'site!=""', 'origin_prometheus!=""', 'environment_class!=""']
+    equal: [site, origin_prometheus, environment_class, job, instance]

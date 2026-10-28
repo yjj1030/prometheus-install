@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/slo/http.yml
+evaluation_interval: 30s
+tests:
+- name: Healthy
+  interval: 30s
+  input_series:
+  - series: ops_http_requests_total{site="example",environment_class="prod",service="oa",result="bad"}
+    values: 0+0x180
+  - series: ops_http_requests_total{site="example",environment_class="prod",service="oa",result="good"}
+    values: 0+300x180
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="ServiceErrorBudgetBurnFast",alertstate="firing"}) or vector(0)
+    eval_time: 65m
+    exp_samples:
+    - labels: '{}'
+      value: 0

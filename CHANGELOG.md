@@ -47,3 +47,13 @@
 - Moved component cache paths under `/usr/local/<component>/cache`.
 - Replaced ambiguous install/uninstall confirmations with numbered choices.
 - Enforced occupied-port rejection and next-free-port recommendation.
+
+## Alert rules v3.0.0 · 2026-10-28
+
+- Add an optional general catalog (24 alert modules, 146 alerts and 45 Linux recording rules), source references, metric contracts and runbooks.
+- Add the maintained institution scenario under `scenarios/sk-91/`, with production, recommended test and test OOM-only profiles.
+- OOM-only suppresses memory utilization/swap thresholds including 100%, while retaining all other test policy categories.
+- Preserve mixed nonprod/stress target support in production; keep production thresholds in the scenario policy.
+- Keep hostname fallback in annotations and remove dynamic historical nodename enrichment from NodeDown identity.
+- Add deterministic profile generation, rule tests, routing tests, isolated Alertmanager inhibition tests and CI. Installation scripts and existing snapshots are unchanged.
+- Live deployment, notification gateway rendering and actual delivery remain unverified; see scenario VALIDATION.md.

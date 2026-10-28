@@ -1,0 +1,182 @@
+groups:
+- name: blackbox_certificate_lifecycle_alerts
+  interval: 30s
+  rules:
+  - alert: SSLCertificateExpiringInfo
+    expr: '(probe_ssl_earliest_cert_expiry - time() <= 100 * 86400)
+
+      and (probe_ssl_earliest_cert_expiry - time() > 0)
+
+      '
+    for: 10m
+    labels:
+      severity: info
+      asset_type: certificate
+      category: certificate
+      alert_type: threshold
+      condition_id: ssl_certificate_expiry
+      notify_profile: certificate
+    annotations:
+      summary: TLS证书进入≤100天临期窗口
+      resolved_summary: 证书临期提示告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 剩余 {{ $value | humanizeDuration }}
+      threshold: 剩余有效期 ≤100天且 >0天，连续 ≥10分钟
+      impact: 相关TLS连接可能受有效期影响，当前业务影响需验证。
+      action: 核对实际证书链、续期安排及部署入口，并在变更后重新探测。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: SSLCertificateExpiringWarning
+    expr: '(probe_ssl_earliest_cert_expiry - time() <= 30 * 86400)
+
+      and (probe_ssl_earliest_cert_expiry - time() > 0)
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: certificate
+      category: certificate
+      alert_type: threshold
+      condition_id: ssl_certificate_expiry
+      notify_profile: certificate
+    annotations:
+      summary: TLS证书进入≤30天临期窗口
+      resolved_summary: 证书临期一般告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 剩余 {{ $value | humanizeDuration }}
+      threshold: 剩余有效期 ≤30天且 >0天，连续 ≥10分钟
+      impact: 相关TLS连接可能受有效期影响，当前业务影响需验证。
+      action: 核对实际证书链、续期安排及部署入口，并在变更后重新探测。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: SSLCertificateExpiringCritical
+    expr: '(probe_ssl_earliest_cert_expiry - time() <= 10 * 86400)
+
+      and (probe_ssl_earliest_cert_expiry - time() > 0)
+
+      '
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: certificate
+      category: certificate
+      alert_type: threshold
+      condition_id: ssl_certificate_expiry
+      notify_profile: certificate
+    annotations:
+      summary: TLS证书进入≤10天临期窗口
+      resolved_summary: 证书临期重要告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 剩余 {{ $value | humanizeDuration }}
+      threshold: 剩余有效期 ≤10天且 >0天，连续 ≥10分钟
+      impact: 相关TLS连接可能受有效期影响，当前业务影响需验证。
+      action: 核对实际证书链、续期安排及部署入口，并在变更后重新探测。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: SSLCertificateExpiringEmergency
+    expr: '(probe_ssl_earliest_cert_expiry - time() <= 3 * 86400)
+
+      and (probe_ssl_earliest_cert_expiry - time() > 0)
+
+      '
+    for: 10m
+    labels:
+      severity: emergency
+      asset_type: certificate
+      category: certificate
+      alert_type: threshold
+      condition_id: ssl_certificate_expiry
+      notify_profile: certificate
+    annotations:
+      summary: TLS证书进入≤3天临期窗口
+      resolved_summary: 证书临期紧急告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 剩余 {{ $value | humanizeDuration }}
+      threshold: 剩余有效期 ≤3天且 >0天，连续 ≥10分钟
+      impact: 相关TLS连接可能受有效期影响，当前业务影响需验证。
+      action: 核对实际证书链、续期安排及部署入口，并在变更后重新探测。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: SSLCertificateExpired
+    expr: time() - probe_ssl_earliest_cert_expiry >= 0
+    for: 5m
+    labels:
+      severity: emergency
+      asset_type: certificate
+      category: certificate
+      alert_type: state
+      condition_id: ssl_certificate_expiry
+      notify_profile: certificate
+    annotations:
+      summary: TLS证书已过期
+      resolved_summary: 证书过期紧急告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 已过期 {{ $value | humanizeDuration }}
+      threshold: 已到期或过期，连续 ≥5分钟
+      impact: 相关TLS连接可能受有效期影响，当前业务影响需验证。
+      action: 核对实际证书链、续期安排及部署入口，并在变更后重新探测。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+- name: blackbox_tls_observation_health
+  interval: 30s
+  rules:
+  - alert: BlackboxTLSProbeFailed
+    expr: 'probe_success{instance=~"https://.+"} == 0
+
+      or probe_success{tls_expected="true"} == 0
+
+      or up{instance=~"https://.+"} == 0
+
+      or up{tls_expected="true"} == 0
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      asset_type: certificate
+      category: certificate
+      alert_type: state
+      condition_id: tls_probe_failure
+      notify_profile: availability
+    annotations:
+      summary: HTTPS/TLS目标探测未成功
+      resolved_summary: HTTPS/TLS目标探测重要告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.module }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 探测结果失败或探测抓取失败
+      threshold: HTTPS URL或tls_expected=true目标的probe_success=0或up=0，连续 ≥5分钟
+      impact: 该位置未能完成目标探测；证书状态和业务影响需进一步核实。
+      action: 先核对Blackbox抓取及debug信息，再区分DNS、链路、TLS、HTTP和探测模块错误。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+  - alert: BlackboxTLSExpiryMetricMissing
+    expr: '(probe_success{instance=~"https://.+"} == 1 or probe_success{tls_expected="true"} == 1)
+
+      unless
+
+      probe_ssl_earliest_cert_expiry
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: certificate
+      category: certificate
+      alert_type: state
+      condition_id: tls_expiry_metric_missing
+      notify_profile: monitoring_agent
+    annotations:
+      summary: TLS目标缺少证书到期指标
+      resolved_summary: 证书到期指标缺失一般告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.module }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 探测成功，但未返回对应证书到期指标
+      threshold: HTTPS URL或tls_expected=true目标probe_success=1，且同标签的到期指标缺失，连续 ≥10分钟
+      impact: 无法据此继续判断证书临期风险。
+      action: 核对实际TLS握手、重定向、探测模块及Exporter输出；纯HTTP目标不要设置tls_expected=true。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'

@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/windows/host.yml
+evaluation_interval: 30s
+tests:
+- name: Windows available physical memory
+  interval: 30s
+  input_series:
+  - series: windows_memory_available_bytes{job="windows_exporter",instance="windows-a"}
+    values: 4+0x60
+  - series: windows_memory_physical_total_bytes{job="windows_exporter",instance="windows-a"}
+    values: 100+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="WindowsMemoryLow",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 1

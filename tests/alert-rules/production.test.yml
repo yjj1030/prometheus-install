@@ -1,0 +1,201 @@
+rule_files:
+- ../../scenarios/sk-91/production/node_alerts.yml
+evaluation_interval: 30s
+tests:
+- name: TCP percentage alone cannot alert at low traffic
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 20+0x50
+  - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 20+0x50
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionWarning",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: TCP outgoing exactly 100 is excluded
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 10+0x50
+  - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 100+0x50
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: TCP warning boundary and pending duration
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 2+0x50
+  - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 101+0x50
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionWarning",alertstate="firing"}) or vector(0)
+    eval_time: 14m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionWarning",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: TCP critical and warning overlap before inhibition
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 5+0x50
+  - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 101+0x50
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 9m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionWarning",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: TCP absent denominator does not fabricate healthy result
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 20+0x50
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: TCP keep firing is time delay not separate recovery threshold
+  interval: 30s
+  input_series:
+  - series: node:tcp_retransmission:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 5+0x30 0+0x20
+  - series: node:tcp_out_segments:rate5m{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 101+0x51
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 16m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeTCPRetransmissionCritical",alertstate="firing"}) or vector(0)
+    eval_time: 18m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Production memory critical remains active
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 99+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: Mixed nonprod memory100 has no usage alert
+  interval: 30s
+  input_series:
+  - series: node:memory_usage:percent{job="node_exporter",instance="host-a:9100",alert_policy="nonprod"}
+    values: 100+0x150
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighCritical",alertstate="firing"}) or vector(0)
+    eval_time: 60m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeMemoryUsageHighWarning",alertstate="firing"}) or vector(0)
+    eval_time: 60m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Stress alias OOM enabled
+  interval: 30s
+  input_series:
+  - series: node_vmstat_oom_kill{job="node_exporter",instance="host-a:9100",alert_policy="stress"}
+    values: 0+0x4 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeOOMKillDetected",alertstate="firing"}) or vector(0)
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: Target disappeared uses historical inventory, not absent all metrics
+  interval: 30s
+  input_series:
+  - series: node:monitor_target:last_seen_timestamp_seconds{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 1+0x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeTargetDisappeared",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: Exporter down is not called host business unavailable
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x10
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeDown",alertstate="firing"}) or vector(0)
+    eval_time: 1m30s
+    exp_samples:
+    - labels: '{}'
+      value: 0
+  - expr: count(ALERTS{alertname="NodeDown",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: Stale up stops evaluation, not proof of recovery
+  interval: 30s
+  input_series:
+  - series: up{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x5 stale
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeDown",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="NodeDown",alertstate="firing"}) or vector(0)
+    eval_time: 4m
+    exp_samples:
+    - labels: '{}'
+      value: 0

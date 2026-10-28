@@ -1,0 +1,26 @@
+groups:
+- name: blackbox_certificate_optional_validity_policy
+  interval: 30s
+  rules:
+  - alert: SSLCertificateValidityAbnormal
+    expr: probe_ssl_earliest_cert_expiry{target_scope="internet"} - time() > 200 * 86400
+    for: 30m
+    labels:
+      severity: info
+      asset_type: certificate
+      category: certificate
+      alert_type: state
+      condition_id: ssl_certificate_validity_abnormal
+      notify_profile: ssl_anomaly
+      anomaly_type: excessive_remaining_validity
+    annotations:
+      summary: 证书有效期策略待核对
+      resolved_summary: 证书有效期核对提示告警已解除
+      object: 探测目标={{ $labels.instance }}{{ if $labels.service }} / 服务={{ $labels.service }}{{ end }}{{ if $labels.module
+        }} / 模块={{ $labels.module }}{{ end }}
+      current_value: 剩余 {{ $value | humanizeDuration }}
+      threshold: 已标记互联网目标剩余有效期 >200天，连续 ≥30分钟；仅作策略核对线索
+      impact: 该线索本身不足以判定证书异常或不合规。
+      action: 核对签发与起止时间、信任体系及实际适用政策。
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'

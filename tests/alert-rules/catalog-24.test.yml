@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/linux/optional.yml
+evaluation_interval: 30s
+tests:
+- name: Linux clock offset
+  interval: 30s
+  input_series:
+  - series: node_timex_offset_seconds{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 1+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="NodeClockOffset",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1

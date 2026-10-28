@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/database/redis.yml
+evaluation_interval: 30s
+tests:
+- name: Redis maxmemory0 is not capacity alert
+  interval: 30s
+  input_series:
+  - series: redis_memory_used_bytes{job="redis",instance="redis-a"}
+    values: 100+0x60
+  - series: redis_memory_max_bytes{job="redis",instance="redis-a"}
+    values: 0+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="RedisMemoryNearLimit",alertstate="firing"}) or vector(0)
+    eval_time: 20m
+    exp_samples:
+    - labels: '{}'
+      value: 0

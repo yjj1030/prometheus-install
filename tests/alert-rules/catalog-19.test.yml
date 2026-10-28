@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/platform/victoriametrics.yml
+evaluation_interval: 30s
+tests:
+- name: VM read-only
+  interval: 30s
+  input_series:
+  - series: vm_storage_is_read_only{job="victoriametrics",instance="vm-a"}
+    values: 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="VMReadOnly",alertstate="firing"}) or vector(0)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1

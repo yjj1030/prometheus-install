@@ -1,0 +1,15 @@
+rule_files:
+- ../../catalog/database/postgresql.yml
+evaluation_interval: 30s
+tests:
+- name: PG replication seconds metric
+  interval: 30s
+  input_series:
+  - series: pg_replication_lag_seconds{job="postgresql",instance="pg-a"}
+    values: 90+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="PostgreSQLReplicaLag",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1

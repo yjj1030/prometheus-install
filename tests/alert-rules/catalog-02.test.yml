@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/database/redis.yml
+evaluation_interval: 30s
+tests:
+- name: Redis service check distinct from scrape success
+  interval: 30s
+  input_series:
+  - series: redis_up{job="redis",instance="redis-a"}
+    values: 0+0x30
+  - series: up{job="redis",instance="redis-a"}
+    values: 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="RedisUnavailable",alertstate="firing"}) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 1

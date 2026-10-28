@@ -1,0 +1,2381 @@
+groups:
+- name: node_availability_alerts
+  interval: 30s
+  rules:
+  - alert: NodeDown
+    expr: up{job="node_exporter"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      asset_type: server
+      category: availability
+      alert_type: state
+      condition_id: node_down
+      notify_profile: availability
+    annotations:
+      summary: Node Exporter采集失败
+      resolved_summary: Node Exporter采集失败重要告警已解除
+      object: 采集目标={{ $labels.instance }} / 主机={{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance
+        }}{{ end }}
+      current_value: 抓取失败（up=0）
+      threshold: Prometheus抓取up=0，连续 ≥2分钟
+      impact: 主机指标可能缺失。
+      action: 先看Targets抓取错误，再区分链路、鉴权、超时和Exporter状态。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeExporterFlapping
+    expr: changes(up{job="node_exporter"}[15m]) >= 4
+    for: 5m
+    labels:
+      severity: warning
+      asset_type: server
+      category: availability
+      alert_type: state
+      condition_id: node_exporter_flapping
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Node Exporter采集状态反复变化
+      resolved_summary: Node Exporter采集状态反复变化一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 最近15分钟up变化 {{ printf "%.0f" $value }}次
+      threshold: 15分钟内状态变化 ≥4次，并持续5分钟
+      impact: 指标连续性可能受影响。
+      action: 对照每次抓取错误，检查链路抖动、超时及Exporter重启。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeExporterCoreCollectorFailed
+    expr: "count without (collector) (\n  node_scrape_collector_success{\n    job=\"node_exporter\",\n    \n   \
+      \ collector=~\"cpu|diskstats|filesystem|filefd|loadavg|meminfo|netdev|netstat|stat|uname|vmstat\"\n  } ==\
+      \ 0\n) > 0\n"
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: availability
+      alert_type: state
+      condition_id: node_exporter_core_collector_failure
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Node Exporter核心采集器失败
+      resolved_summary: 核心采集器失败一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 失败的核心采集器 {{ printf "%.0f" $value }}个
+      threshold: 关键 Collector 失败持续 ≥15分钟
+      impact: 部分主机指标可能缺失。
+      action: 核查失败collector及Exporter日志，先确认权限、超时和指标覆盖。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeExporterCoreCollectorMissing
+    expr: '(
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "cpu", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "diskstats", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "filesystem", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "filefd", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "loadavg", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "meminfo", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "netdev", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "netstat", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "stat", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "uname", "instance", ".*")
+
+      or
+
+      label_replace(up{job="node_exporter"} == 1, "collector", "vmstat", "instance", ".*")
+
+      )
+
+      unless on (instance, job, collector)
+
+      node_scrape_collector_success{job="node_exporter"}
+
+      '
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: availability
+      alert_type: state
+      condition_id: node_exporter_core_collector_missing
+      notify_profile: monitoring_agent
+    annotations:
+      summary: Node Exporter必需采集器指标缺失
+      resolved_summary: 必需采集器指标缺失告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 采集器={{
+        $labels.collector }}'
+      current_value: 缺失采集器={{ $labels.collector }}
+      threshold: up=1但必需采集器指标缺失，连续 ≥15分钟
+      action: 检查collector启用参数、collect[]采集过滤及Exporter版本；按实际监控职责调整必需列表。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeTargetDisappeared
+    expr: '(node:monitor_target:last_seen_timestamp_seconds{alert_policy!~"nonprod|stress"} > 0)
+
+      unless on (instance, job) up{job="node_exporter"}
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: server
+      category: availability
+      alert_type: state
+      condition_id: node_target_disappeared
+      notify_profile: monitoring_agent
+    annotations:
+      summary: 监控目标已从采集列表消失
+      resolved_summary: 目标消失告警已结束（目标重新出现或24小时历史窗口结束）
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 最近出现时间={{ $value | humanizeTimestamp }}
+      threshold: 过去24小时出现过的目标当前无up时序，连续 ≥10分钟
+      action: 核对file_sd清单、扫描器变更及目标是否正式下线；经批准下线应纳入维护记录，必要时静默该告警。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+- name: node_compute_alerts
+  interval: 30s
+  rules:
+  - alert: NodeCPUUsageHighWarning
+    expr: node:cpu_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+    for: 20m
+    labels:
+      severity: warning
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_usage
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU非空闲占比偏高
+      resolved_summary: CPU非空闲占比一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU非空闲占比 ≥85%，连续 ≥20分钟
+      impact: 可能存在计算负载或等待压力。
+      action: 先区分应用计算、iowait和steal，再定位进程或底层资源。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeCPUUsageHighCritical
+    expr: node:cpu_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_usage
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU非空闲占比偏高
+      resolved_summary: CPU非空闲占比重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU非空闲占比 ≥95%，连续 ≥10分钟
+      impact: 可能存在计算负载或等待压力。
+      action: 先区分应用计算、iowait和steal，再定位进程或底层资源。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeCPUIOWaitHighWarning
+    expr: node:cpu_iowait:percent{alert_policy!~"nonprod|stress"} >= 25
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_iowait
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU的I/O等待占比偏高
+      resolved_summary: CPU的I/O等待占比一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU iowait占比 ≥25%，连续 ≥15分钟
+      impact: 可能存在与I/O等待相关的性能压力。
+      action: 先对照块设备延迟、队列和进程I/O，核实是否存在存储瓶颈。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeCPUIOWaitHighCritical
+    expr: node:cpu_iowait:percent{alert_policy!~"nonprod|stress"} >= 40
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_iowait
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU的I/O等待占比偏高
+      resolved_summary: CPU的I/O等待占比重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU iowait占比 ≥40%，连续 ≥10分钟
+      impact: 可能存在与I/O等待相关的性能压力。
+      action: 先对照块设备延迟、队列和进程I/O，核实是否存在存储瓶颈。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeCPUStealHighWarning
+    expr: node:cpu_steal:percent{alert_policy!~"nonprod|stress"} >= 10
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_steal
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU被虚拟化调度占用的时间比例偏高
+      resolved_summary: CPU steal占比一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU steal占比 ≥10%，连续 ≥15分钟
+      impact: 虚拟机可能未及时获得CPU调度。
+      action: 核查宿主机CPU争用、资源超分配和虚拟机限制。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeCPUStealHighCritical
+    expr: node:cpu_steal:percent{alert_policy!~"nonprod|stress"} >= 20
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: compute
+      alert_type: threshold
+      condition_id: node_cpu_steal
+      notify_profile: resource_cpu
+    annotations:
+      summary: CPU被虚拟化调度占用的时间比例偏高
+      resolved_summary: CPU steal占比重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: '{{ printf "%.2f" $value }}%'
+      threshold: 最近5分钟CPU steal占比 ≥20%，连续 ≥10分钟
+      impact: 虚拟机可能未及时获得CPU调度。
+      action: 核查宿主机CPU争用、资源超分配和虚拟机限制。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+- name: node_memory_alerts
+  interval: 30s
+  rules:
+  - alert: NodeMemoryUsageHighWarning
+    expr: node:memory_usage:percent{alert_policy!~"nonprod|stress"} >= 96
+    for: 20m
+    labels:
+      severity: warning
+      asset_type: server
+      category: memory
+      alert_type: threshold
+      condition_id: node_memory_usage
+      notify_profile: resource_memory
+    annotations:
+      summary: 内存可用余量偏低
+      resolved_summary: 内存使用率一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 使用率 {{ printf "%.2f" $value }}%（MemAvailable口径）
+      threshold: MemAvailable口径内存使用率 ≥96%，连续 ≥20分钟
+      impact: 继续下降可能增加回收、换页或OOM风险。
+      action: 核对进程内存及近期增长，再结合压力和内核日志判断。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeMemoryUsageHighCritical
+    expr: node:memory_usage:percent{alert_policy!~"nonprod|stress"} >= 98
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: memory
+      alert_type: threshold
+      condition_id: node_memory_usage
+      notify_profile: resource_memory
+    annotations:
+      summary: 内存可用余量偏低
+      resolved_summary: 内存使用率重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 使用率 {{ printf "%.2f" $value }}%（MemAvailable口径）
+      threshold: MemAvailable口径内存使用率 ≥98%，连续 ≥10分钟
+      impact: 继续下降可能增加回收、换页或OOM风险。
+      action: 核对进程内存及近期增长，再结合压力和内核日志判断。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeSwapPressureWarning
+    expr: 'node:swap_usage:percent{alert_policy!~"nonprod|stress"} >= 60
+
+      and on (instance, job)
+
+      node:swap_activity:rate5m{alert_policy!~"nonprod|stress"} > 1
+
+      '
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: memory
+      alert_type: threshold
+      condition_id: node_swap_pressure
+      notify_profile: resource_memory
+    annotations:
+      summary: Swap占用较高且持续发生换页
+      resolved_summary: Swap压力一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: Swap使用率 {{ printf "%.2f" $value }}%
+      threshold: Swap使用率 ≥60%，且最近5分钟换入换出合计 >1页/秒，连续 ≥15分钟
+      impact: 换页活动可能伴随响应变慢。
+      action: 核对内存可用量和高换页进程，不仅按Swap已用量判断。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeOOMKillDetected
+    expr: increase(node_vmstat_oom_kill{job="node_exporter"}[10m]) > 0
+    labels:
+      severity: critical
+      asset_type: server
+      category: memory
+      alert_type: event
+      condition_id: node_oom_kill
+      notify_profile: event
+    annotations:
+      summary: 检测到OOM Kill
+      resolved_summary: OOM事件已移出10分钟检测窗口；请另行确认业务恢复
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }}'
+      current_value: 最近10分钟检测到OOM Kill计数器增量 >0
+      threshold: 最近10分钟OOM Kill计数器增量 >0；无额外for等待
+      impact: 可能有进程被内核终止，具体进程和影响须核实。
+      action: 先查内核日志定位被终止进程，再确认对应服务状态。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+- name: node_filesystem_alerts
+  interval: 30s
+  rules:
+  - alert: NodeFilesystemUsageWarning
+    expr: node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+    for: 30m
+    labels:
+      severity: warning
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_usage
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统容量占用偏高
+      resolved_summary: 文件系统容量一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 文件系统使用率（df近似口径） ≥85%，连续 ≥30分钟
+      impact: 继续增长可能导致该文件系统写入失败。
+      action: 先查增长目录及可清理范围，再评估扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemUsageCritical
+    expr: node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_usage
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统容量占用偏高
+      resolved_summary: 文件系统容量重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 文件系统使用率（df近似口径） ≥95%，连续 ≥10分钟
+      impact: 继续增长可能导致该文件系统写入失败。
+      action: 先查增长目录及可清理范围，再评估扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemFreeSpaceCritical
+    expr: 'node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"} < 2 * 1024 * 1024 * 1024
+
+      and on (instance, job, device, fstype, mountpoint)
+
+      node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 90
+
+      '
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_free_space
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统可用空间偏低
+      resolved_summary: 文件系统可用空间重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 普通用户可用 {{ $value | humanize1024 }}B
+      threshold: 可用空间 <2GiB 且使用率 >90%，持续 ≥10分钟
+      impact: 剩余可写空间可能不足以承接后续写入。
+      action: 核实当前写入规模、增长来源和可清理范围，必要时按变更扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemFreeSpaceEmergency
+    expr: 'node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"} < 1 * 1024 * 1024 * 1024
+
+      and on (instance, job, device, fstype, mountpoint)
+
+      node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 98
+
+      '
+    for: 5m
+    labels:
+      severity: emergency
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_free_space
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统可用空间偏低
+      resolved_summary: 文件系统可用空间紧急告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 普通用户可用 {{ $value | humanize1024 }}B
+      threshold: 可用空间 <1GiB 且使用率 >98%，持续 ≥5分钟
+      impact: 剩余可写空间可能不足以承接后续写入。
+      action: 核实当前写入规模、增长来源和可清理范围，必要时按变更扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemWillFillIn24Hours
+    expr: 'predict_linear(node:filesystem_avail:bytes{alert_policy!~"nonprod|stress"}[6h], 24 * 3600) < 0
+
+      and on (instance, job, device, fstype, mountpoint)
+
+      node:filesystem_usage:percent{alert_policy!~"nonprod|stress"} > 75
+
+      '
+    for: 30m
+    labels:
+      severity: warning
+      asset_type: server
+      category: filesystem
+      alert_type: forecast
+      condition_id: node_filesystem_forecast
+      notify_profile: capacity_forecast
+    annotations:
+      summary: 文件系统存在未来24小时耗尽风险
+      resolved_summary: 文件系统容量预测一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 按过去6小时趋势拟合，未来24小时可能耗尽
+      threshold: 以过去6小时可用空间线性拟合24小时后 <0，且当前使用率 >75%，连续 ≥30分钟
+      impact: 现有增长趋势若持续，可能耗尽可用空间。
+      action: 核实增长是否稳定及是否有计划任务，再安排清理或扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemInodeWarning
+    expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+    for: 30m
+    labels:
+      severity: warning
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_inode
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统inode占用偏高
+      resolved_summary: 文件系统inode一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: inode使用率 {{ printf "%.2f" $value }}%
+      threshold: inode使用率 ≥85%，连续 ≥30分钟
+      impact: 可能无法创建新文件或目录。
+      action: 先定位大量小文件的目录和生成来源，再确认清理范围。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemInodeCritical
+    expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_inode
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统inode占用偏高
+      resolved_summary: 文件系统inode重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: inode使用率 {{ printf "%.2f" $value }}%
+      threshold: inode使用率 ≥95%，连续 ≥10分钟
+      impact: 可能无法创建新文件或目录。
+      action: 先定位大量小文件的目录和生成来源，再确认清理范围。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemInodeEmergency
+    expr: node:filesystem_inode_usage:percent{alert_policy!~"nonprod|stress"} >= 99
+    for: 5m
+    labels:
+      severity: emergency
+      asset_type: server
+      category: filesystem
+      alert_type: capacity
+      condition_id: node_filesystem_inode
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统inode占用偏高
+      resolved_summary: 文件系统inode紧急告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: inode使用率 {{ printf "%.2f" $value }}%
+      threshold: inode使用率 ≥99%，连续 ≥5分钟
+      impact: 可能无法创建新文件或目录。
+      action: 先定位大量小文件的目录和生成来源，再确认清理范围。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+  - alert: NodeFilesystemReadOnly
+    expr: "node_filesystem_readonly{\n  job=\"node_exporter\",\n  \n  fstype=~\"ext[234]?|xfs|btrfs|zfs\",\n  mountpoint!~\"\
+      /run($|/.*)|/var/lib/(docker|containers)/.*|/var/lib/kubelet/pods/.*\"\n} == 1\nor\nnode_filesystem_readonly{job=\"\
+      node_exporter\",fstype=~\"vfat|msdos\",mountpoint=~\"/boot|/boot/efi|/efi\"} == 1\n"
+    for: 2m
+    labels:
+      severity: critical
+      asset_type: server
+      category: filesystem
+      alert_type: state
+      condition_id: node_filesystem_readonly
+      notify_profile: capacity_filesystem
+    annotations:
+      summary: 文件系统处于只读状态
+      resolved_summary: 文件系统只读重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 挂载点={{
+        $labels.mountpoint }} / 设备={{ $labels.device }} / 类型={{ $labels.fstype }}'
+      current_value: 只读（readonly=1）
+      threshold: 只读状态持续 ≥2分钟
+      impact: 该文件系统上的写入可能受限。
+      action: 先核查内核、文件系统和存储错误，不直接强制改回读写。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+- name: node_storage_alerts
+  interval: 30s
+  rules:
+  - alert: NodeDiskIOUtilizationWarning
+    expr: node:disk_io_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 90
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: storage
+      alert_type: threshold
+      condition_id: node_disk_io_utilization
+      notify_profile: performance_storage
+    annotations:
+      summary: 块设备I/O忙碌时间占比偏高
+      resolved_summary: 块设备I/O忙碌占比一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 块设备={{
+        $labels.device }}'
+      current_value: 最近5分钟忙碌时间占比 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟块设备I/O忙碌时间占比 ≥90%，连续 ≥15分钟
+      impact: 设备较忙，是否形成性能瓶颈需结合延迟和队列。
+      action: 先对照同设备延迟、IOPS和队列，再定位进程及底层存储。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeDiskIOUtilizationCritical
+    expr: node:disk_io_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 98
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: storage
+      alert_type: threshold
+      condition_id: node_disk_io_utilization
+      notify_profile: performance_storage
+    annotations:
+      summary: 块设备I/O忙碌时间占比偏高
+      resolved_summary: 块设备I/O忙碌占比重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 块设备={{
+        $labels.device }}'
+      current_value: 最近5分钟忙碌时间占比 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟块设备I/O忙碌时间占比 ≥98%，连续 ≥10分钟
+      impact: 设备较忙，是否形成性能瓶颈需结合延迟和队列。
+      action: 先对照同设备延迟、IOPS和队列，再定位进程及底层存储。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeDiskLatencyWarning
+    expr: '(node:disk_latency:seconds:rate5m{alert_policy!~"nonprod|stress"} * 1000) >= 50
+
+      and on (instance, job, device, direction)
+
+      node:disk_iops:rate5m{alert_policy!~"nonprod|stress"} >= 5
+
+      '
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: storage
+      alert_type: threshold
+      condition_id: node_disk_latency
+      notify_profile: performance_storage
+    annotations:
+      summary: 块设备平均I/O延迟偏高
+      resolved_summary: 块设备平均I/O延迟一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 块设备={{
+        $labels.device }} / 方向={{ if eq $labels.direction "READ" }}读取(READ){{ else if eq $labels.direction "WRITE"
+        }}写入(WRITE){{ else if eq $labels.direction "RX" }}接收(RX){{ else if eq $labels.direction "TX" }}发送(TX){{
+        else }}{{ $labels.direction }}{{ end }}'
+      current_value: 平均延迟 {{ printf "%.2f" $value }} ms
+      threshold: 最近5分钟同方向平均延迟 ≥50 ms，且同方向IOPS ≥5，连续 ≥15分钟
+      impact: 相应读写操作可能出现等待增加。
+      action: 先定位高I/O进程和队列，再查底层存储健康与性能。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeDiskLatencyCritical
+    expr: '(node:disk_latency:seconds:rate5m{alert_policy!~"nonprod|stress"} * 1000) >= 200
+
+      and on (instance, job, device, direction)
+
+      node:disk_iops:rate5m{alert_policy!~"nonprod|stress"} >= 5
+
+      '
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: storage
+      alert_type: threshold
+      condition_id: node_disk_latency
+      notify_profile: performance_storage
+    annotations:
+      summary: 块设备平均I/O延迟偏高
+      resolved_summary: 块设备平均I/O延迟重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 块设备={{
+        $labels.device }} / 方向={{ if eq $labels.direction "READ" }}读取(READ){{ else if eq $labels.direction "WRITE"
+        }}写入(WRITE){{ else if eq $labels.direction "RX" }}接收(RX){{ else if eq $labels.direction "TX" }}发送(TX){{
+        else }}{{ $labels.direction }}{{ end }}'
+      current_value: 平均延迟 {{ printf "%.2f" $value }} ms
+      threshold: 最近5分钟同方向平均延迟 ≥200 ms，且同方向IOPS ≥5，连续 ≥10分钟
+      impact: 相应读写操作可能出现等待增加。
+      action: 先定位高I/O进程和队列，再查底层存储健康与性能。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+- name: node_network_alerts
+  interval: 30s
+  rules:
+  - alert: NodeNetworkUtilizationWarning
+    expr: node:network_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 85
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_network_utilization
+      notify_profile: network_bandwidth
+    annotations:
+      summary: 网卡参考带宽利用率偏高
+      resolved_summary: 网卡参考带宽利用率一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 网卡={{
+        $labels.device }} / 方向={{ if eq $labels.direction "READ" }}读取(READ){{ else if eq $labels.direction "WRITE"
+        }}写入(WRITE){{ else if eq $labels.direction "RX" }}接收(RX){{ else if eq $labels.direction "TX" }}发送(TX){{
+        else }}{{ $labels.direction }}{{ end }}'
+      current_value: 参考带宽利用率 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟单网卡单方向参考带宽利用率 ≥85%，连续 ≥15分钟
+      impact: 流量接近当前参考带宽，实际限制需核实。
+      action: 先核对接口速率和主要流量，再判断是否需要分流或扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeNetworkUtilizationCritical
+    expr: node:network_utilization:rate5m{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_network_utilization
+      notify_profile: network_bandwidth
+    annotations:
+      summary: 网卡参考带宽利用率偏高
+      resolved_summary: 网卡参考带宽利用率重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 网卡={{
+        $labels.device }} / 方向={{ if eq $labels.direction "READ" }}读取(READ){{ else if eq $labels.direction "WRITE"
+        }}写入(WRITE){{ else if eq $labels.direction "RX" }}接收(RX){{ else if eq $labels.direction "TX" }}发送(TX){{
+        else }}{{ $labels.direction }}{{ end }}'
+      current_value: 参考带宽利用率 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟单网卡单方向参考带宽利用率 ≥95%，连续 ≥10分钟
+      impact: 流量接近当前参考带宽，实际限制需核实。
+      action: 先核对接口速率和主要流量，再判断是否需要分流或扩容。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeNetworkErrorDropRatioWarning
+    expr: node:network_error_drop_ratio:rate5m{alert_policy!~"nonprod|stress"} >= 0.5
+    for: 10m
+    labels:
+      severity: warning
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_network_error_drop_ratio
+      notify_profile: network_quality
+    annotations:
+      summary: 网卡错误及丢弃计数比例偏高
+      resolved_summary: 网卡错误及丢弃计数比例一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 网卡={{
+        $labels.device }} / 收发合计'
+      current_value: 错误及丢弃计数比例 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟错误及丢弃计数/收发包计数的比例 ≥0.5%，且最近5分钟收发包速率 >10包/秒，连续 ≥10分钟
+      impact: 可能存在本机接口或相关链路质量问题。
+      action: 对照本机和交换机端口计数，区分错误、丢弃和拥塞来源。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeNetworkErrorDropRatioCritical
+    expr: node:network_error_drop_ratio:rate5m{alert_policy!~"nonprod|stress"} >= 2
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_network_error_drop_ratio
+      notify_profile: network_quality
+    annotations:
+      summary: 网卡错误及丢弃计数比例偏高
+      resolved_summary: 网卡错误及丢弃计数比例重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 网卡={{
+        $labels.device }} / 收发合计'
+      current_value: 错误及丢弃计数比例 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟错误及丢弃计数/收发包计数的比例 ≥2%，且最近5分钟收发包速率 >10包/秒，连续 ≥10分钟
+      impact: 可能存在本机接口或相关链路质量问题。
+      action: 对照本机和交换机端口计数，区分错误、丢弃和拥塞来源。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeTCPRetransmissionWarning
+    expr: 'node:tcp_retransmission:percent{alert_policy!~"nonprod|stress"} >= 2
+
+      and on (instance, job)
+
+      node:tcp_out_segments:rate5m{alert_policy!~"nonprod|stress"} > 100
+
+      '
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_tcp_retransmission
+      notify_profile: network_quality
+    annotations:
+      summary: 主机TCP重传比例偏高
+      resolved_summary: TCP重传一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 主机 TCP
+        栈'
+      current_value: 最近5分钟重传比例 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟主机 TCP 重传率 ≥2%，正常发送量 >100段/秒，连续 ≥15分钟
+      impact: 可能伴随连接时延增加或吞吐下降。
+      action: 对照每秒重传数、正常发送量和业务响应，定位具体连接及对端，再检查对应通信路径。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeTCPRetransmissionCritical
+    expr: 'node:tcp_retransmission:percent{alert_policy!~"nonprod|stress"} >= 5
+
+      and on (instance, job)
+
+      node:tcp_out_segments:rate5m{alert_policy!~"nonprod|stress"} > 100
+
+      '
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: network
+      alert_type: threshold
+      condition_id: node_tcp_retransmission
+      notify_profile: network_quality
+    annotations:
+      summary: 主机TCP重传比例偏高
+      resolved_summary: TCP重传重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 主机 TCP
+        栈'
+      current_value: 最近5分钟重传比例 {{ printf "%.2f" $value }}%
+      threshold: 最近5分钟主机 TCP 重传率 ≥5%，正常发送量 >100段/秒，连续 ≥10分钟
+      impact: 可能伴随连接时延增加或吞吐下降。
+      action: 对照每秒重传数、正常发送量和业务响应，定位具体连接及对端，再检查对应通信路径。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+- name: node_system_limit_alerts
+  interval: 30s
+  rules:
+  - alert: NodeFileDescriptorUsageWarning
+    expr: node:filefd_usage:percent{alert_policy!~"nonprod|stress"} >= 85
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: system_limit
+      alert_type: threshold
+      condition_id: node_filefd_usage
+      notify_profile: system_limit
+    annotations:
+      summary: 系统文件句柄占用偏高
+      resolved_summary: 系统文件句柄一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 系统文件句柄'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 系统文件句柄已分配量/系统上限 ≥85%，连续 ≥15分钟
+      impact: 接近系统上限可能影响新句柄分配。
+      action: 核对进程句柄增长和连接规模，先排查异常增长或泄漏。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeFileDescriptorUsageCritical
+    expr: node:filefd_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: system_limit
+      alert_type: threshold
+      condition_id: node_filefd_usage
+      notify_profile: system_limit
+    annotations:
+      summary: 系统文件句柄占用偏高
+      resolved_summary: 系统文件句柄重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / 系统文件句柄'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 系统文件句柄已分配量/系统上限 ≥95%，连续 ≥10分钟
+      impact: 接近系统上限可能影响新句柄分配。
+      action: 核对进程句柄增长和连接规模，先排查异常增长或泄漏。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeConntrackUsageWarning
+    expr: node:conntrack_usage:percent{alert_policy!~"nonprod|stress"} >= 80
+    for: 15m
+    labels:
+      severity: warning
+      asset_type: server
+      category: system_limit
+      alert_type: threshold
+      condition_id: node_conntrack_usage
+      notify_profile: system_limit
+    annotations:
+      summary: 连接跟踪表占用偏高
+      resolved_summary: 连接跟踪表一般告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / nf_conntrack'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 连接跟踪表已用量/上限 ≥80%，连续 ≥15分钟
+      impact: 接近表上限可能影响新连接跟踪。
+      action: 先查连接来源、状态和增长原因，再评估回收与容量参数。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m
+  - alert: NodeConntrackUsageCritical
+    expr: node:conntrack_usage:percent{alert_policy!~"nonprod|stress"} >= 95
+    for: 10m
+    labels:
+      severity: critical
+      asset_type: server
+      category: system_limit
+      alert_type: threshold
+      condition_id: node_conntrack_usage
+      notify_profile: system_limit
+    annotations:
+      summary: 连接跟踪表占用偏高
+      resolved_summary: 连接跟踪表重要告警已解除
+      object: '{{ if $labels.asset_ip }}{{ $labels.asset_ip }}{{ else }}{{ $labels.instance }}{{ end }} / nf_conntrack'
+      current_value: 使用率 {{ printf "%.2f" $value }}%
+      threshold: 连接跟踪表已用量/上限 ≥95%，连续 ≥10分钟
+      impact: 接近表上限可能影响新连接跟踪。
+      action: 先查连接来源、状态和增长原因，再评估回收与容量参数。
+      hostname: '{{- if $labels.hostname -}}
+
+        {{- $labels.hostname -}}
+
+        {{- else if $labels.nodename -}}
+
+        {{- $labels.nodename -}}
+
+        {{- else if and $labels.job $labels.instance -}}
+
+        {{- $fresh := query (printf "max by (nodename) (node_uname_info{job=%q,instance=%q,nodename!=\"\"} == 1
+        and (time() - timestamp(node_uname_info{job=%q,instance=%q,nodename!=\"\"}) <= 180))" $labels.job $labels.instance
+        $labels.job $labels.instance) -}}
+
+        {{- if eq (len $fresh) 1 -}}
+
+        {{- (index $fresh 0).Labels.nodename -}}
+
+        {{- else if eq (len $fresh) 0 -}}
+
+        {{- $history := query (printf "sort_desc(max by (nodename) (node:hostname:last_seen_timestamp_seconds{job=%q,instance=%q,nodename!=\"\"}
+        >= time() - 86400))" $labels.job $labels.instance) -}}
+
+        {{- if eq (len $history) 1 -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else if gt (len $history) 1 -}}
+
+        {{- if gt (index $history 0).Value (index $history 1).Value -}}
+
+        {{- (index $history 0).Labels.nodename -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}
+
+        {{- else -}}未提供{{- end -}}'
+    keep_firing_for: 2m

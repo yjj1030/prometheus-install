@@ -1,0 +1,93 @@
+rule_files:
+- ../../catalog/linux/node_recording.yml
+evaluation_interval: 30s
+tests:
+- name: TCP records use segment counts, not NIC bytes
+  interval: 30s
+  input_series:
+  - series: node_netstat_Tcp_RetransSegs{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+30x20
+  - series: node_netstat_Tcp_OutSegs{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+300x20
+  promql_expr_test:
+  - expr: sum(node:tcp_retransmission:percent)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 10
+  - expr: sum(node:tcp_out_segments:rate5m)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 10
+- name: TCP zero output produces absent ratio
+  interval: 30s
+  input_series:
+  - series: node_netstat_Tcp_RetransSegs{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x20
+  - series: node_netstat_Tcp_OutSegs{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x20
+  promql_expr_test:
+  - expr: count(node:tcp_retransmission:percent) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: MemAvailable used instead of free only
+  interval: 30s
+  input_series:
+  - series: node_memory_MemAvailable_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 20+0x20
+  - series: node_memory_MemFree_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 1+0x20
+  - series: node_memory_MemTotal_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 100+0x20
+  promql_expr_test:
+  - expr: sum(node:memory_usage:percent)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 80
+- name: Swap absent when not configured
+  interval: 30s
+  input_series:
+  - series: node_memory_SwapTotal_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x20
+  - series: node_memory_SwapFree_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default"}
+    values: 0+0x20
+  promql_expr_test:
+  - expr: count(node:swap_usage:percent) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 0
+- name: Filesystem accounts for reserved blocks as df
+  interval: 30s
+  input_series:
+  - series: node_filesystem_size_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default",device="/dev/vda1",mountpoint="/",fstype="ext4"}
+    values: 100+0x20
+  - series: node_filesystem_free_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default",device="/dev/vda1",mountpoint="/",fstype="ext4"}
+    values: 20+0x20
+  - series: node_filesystem_avail_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default",device="/dev/vda1",mountpoint="/",fstype="ext4"}
+    values: 10+0x20
+  promql_expr_test:
+  - expr: round(sum(node:filesystem_usage:percent),0.01)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 88.89
+- name: Unknown NIC speed is excluded
+  interval: 30s
+  input_series:
+  - series: node_network_receive_bytes_total{job="node_exporter",instance="host-a:9100",alert_policy="default",device="eth0"}
+    values: 0+300x20
+  - series: node_network_transmit_bytes_total{job="node_exporter",instance="host-a:9100",alert_policy="default",device="eth0"}
+    values: 0+300x20
+  - series: node_network_speed_bytes{job="node_exporter",instance="host-a:9100",alert_policy="default",device="eth0"}
+    values: -1+0x20
+  promql_expr_test:
+  - expr: count(node:network_utilization:rate5m) or vector(0)
+    eval_time: 5m
+    exp_samples:
+    - labels: '{}'
+      value: 0

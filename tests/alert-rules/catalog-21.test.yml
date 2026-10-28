@@ -1,0 +1,17 @@
+rule_files:
+- ../../catalog/platform/alertmanager.yml
+evaluation_interval: 30s
+tests:
+- name: Alertmanager member views differ
+  interval: 30s
+  input_series:
+  - series: alertmanager_cluster_members{job="alertmanager",instance="am-a"}
+    values: 2+0x60
+  - series: alertmanager_cluster_members{job="alertmanager",instance="am-b"}
+    values: 3+0x60
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="AlertmanagerClusterInconsistent",alertstate="firing"}) or vector(0)
+    eval_time: 15m
+    exp_samples:
+    - labels: '{}'
+      value: 1

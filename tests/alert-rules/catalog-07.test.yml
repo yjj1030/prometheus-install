@@ -1,0 +1,20 @@
+rule_files:
+- ../../catalog/probes/availability.yml
+evaluation_interval: 30s
+tests:
+- name: Missing probe_success distinct from failure
+  interval: 30s
+  input_series:
+  - series: up{job="blackbox",instance="https://service.example.invalid"}
+    values: 1+0x30
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="BlackboxSuccessMetricMissing",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: count(ALERTS{alertname="BlackboxEndpointFailed",alertstate="firing"}) or vector(0)
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 0

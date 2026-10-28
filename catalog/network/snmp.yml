@@ -1,0 +1,101 @@
+groups:
+- name: network_snmp
+  interval: 30s
+  rules:
+  - alert: SNMPInterfaceDown
+    expr: (ifOperStatus{job="snmp"} != 1) and on(instance,job,ifIndex) (ifAdminStatus{job="snmp"} == 1)
+    labels:
+      severity: warning
+      category: network
+      condition_id: snmp_link
+      alert_type: state
+    annotations:
+      summary: 管理启用的接口未运行
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 先排除空口、备用链路；用ifAlias/资产清单限定受管接口。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#network
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (ifOperStatus{job="snmp"} != 1) and on(instance,job,ifIndex) (ifAdminStatus{job="snmp"} == 1)；持续
+        5m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 5m
+  - alert: SNMPInterfaceSaturated
+    expr: (rate(ifHCInOctets{job="snmp"}[5m]) * 8 / on(instance,job,ifIndex) ifHighSpeed{job="snmp"} / 1000000 >
+      0.85) and on(instance,job,ifIndex) (ifHighSpeed{job="snmp"} > 0)
+    labels:
+      severity: warning
+      category: network
+      condition_id: snmp_rx
+      alert_type: state
+    annotations:
+      summary: 接口入方向带宽持续偏高
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对端口协商速率、丢弃和业务流量。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#network
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (rate(ifHCInOctets{job="snmp"}[5m]) * 8 / on(instance,job,ifIndex) ifHighSpeed{job="snmp"} / 1000000
+        > 0.85) and on(instance,job,ifIndex) (ifHighSpeed{job="snmp"} > 0)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: SNMPInterfaceTxSaturated
+    expr: (rate(ifHCOutOctets{job="snmp"}[5m]) * 8 / on(instance,job,ifIndex) ifHighSpeed{job="snmp"} / 1000000
+      > 0.85) and on(instance,job,ifIndex) (ifHighSpeed{job="snmp"} > 0)
+    labels:
+      severity: warning
+      category: network
+      condition_id: snmp_tx
+      alert_type: state
+    annotations:
+      summary: 接口出方向带宽持续偏高
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对出口利用率、整形与队列丢弃。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#network
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: (rate(ifHCOutOctets{job="snmp"}[5m]) * 8 / on(instance,job,ifIndex) ifHighSpeed{job="snmp"} / 1000000
+        > 0.85) and on(instance,job,ifIndex) (ifHighSpeed{job="snmp"} > 0)；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
+  - alert: SNMPInterfaceErrors
+    expr: rate(ifInErrors{job="snmp"}[5m]) + rate(ifOutErrors{job="snmp"}[5m]) > 1
+    labels:
+      severity: warning
+      category: network
+      condition_id: snmp_errors
+      alert_type: state
+    annotations:
+      summary: 接口错误持续增长
+      description: 目标={{ $labels.instance }}，当前计算值={{ $value }}。
+      action: 核对光模块、CRC、双工及物理层，按接口定位。
+      runbook_url: https://github.com/yjj1030/prometheus-install/blob/main/catalog/RUNBOOKS.md#network
+      resolved_summary: 告警条件已不再满足；请另行确认业务状态
+      object: '{{ if $labels.service }}服务={{ $labels.service }} / {{ end }}目标={{ $labels.instance }}{{ if $labels.device
+        }} / 设备={{ $labels.device }}{{ end }}{{ if $labels.ifIndex }} / 接口索引={{ $labels.ifIndex }}{{ end }}{{ if
+        $labels.mountpoint }} / 挂载={{ $labels.mountpoint }}{{ end }}{{ if $labels.namespace }} / 命名空间={{ $labels.namespace
+        }}{{ end }}{{ if $labels.pod }} / Pod={{ $labels.pod }}{{ end }}{{ if $labels.queue }} / 队列={{ $labels.queue
+        }}{{ end }}{{ if $labels.volume }} / 卷={{ $labels.volume }}{{ end }}'
+      current_value: '{{ $value }}（计算口径和单位见threshold表达式）'
+      threshold: rate(ifInErrors{job="snmp"}[5m]) + rate(ifOutErrors{job="snmp"}[5m]) > 1；持续 15m
+      hostname: '{{ if $labels.hostname }}{{ $labels.hostname }}{{ else if $labels.nodename }}{{ $labels.nodename
+        }}{{ else }}未提供{{ end }}'
+    for: 15m
